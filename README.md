@@ -1,4 +1,4 @@
-# Image → DTF
+# GS Baseball DTF Studio
 
 A single-page web app that turns a design into a print-ready DTF file: a transparent, high-resolution PNG tagged at 300 DPI.
 
