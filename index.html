@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#14532d">
+<title>Image to DTF — 300 DPI Transparent PNG</title>
+<style>
+  :root{
+    --bg:#f5f3ee; --card:#fff; --ink:#1c1c1c; --muted:#6b6b6b; --line:#e3dfd6;
+    --accent:#c8102e; --accent2:#14532d; --r:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-tap-highlight-color:transparent}
+  header{background:var(--accent2);color:#fff;padding:18px 16px 16px}
+  header h1{margin:0;font-size:22px;letter-spacing:.2px}
+  header p{margin:4px 0 0;font-size:13px;opacity:.85}
+  main{max-width:980px;margin:0 auto;padding:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
+  .drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:2px dashed #c9c3b5;border-radius:var(--r);padding:34px 16px;text-align:center;cursor:pointer;background:#fbfaf7}
+  .drop.over{border-color:var(--accent);background:#fff5f6}
+  .drop strong{font-size:17px}
+  .drop span{color:var(--muted);font-size:13px}
+  .btn{appearance:none;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;padding:10px 14px;font-size:15px;font-weight:600;cursor:pointer}
+  .btn:disabled{opacity:.45}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;width:100%;padding:15px;font-size:17px}
+  .btn.dark{background:var(--accent2);border-color:var(--accent2);color:#fff}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .seg{display:flex;background:#efece5;border-radius:11px;padding:3px;gap:3px}
+  .seg button{flex:1;border:0;background:transparent;padding:9px 6px;border-radius:9px;font-size:14px;font-weight:600;color:#444;cursor:pointer}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+  .stage{position:relative;border-radius:12px;overflow:auto;max-height:70vh;border:1px solid var(--line)}
+  .stage.checker{background-color:#fff;background-image:linear-gradient(45deg,#ddd 25%,transparent 25%),linear-gradient(-45deg,#ddd 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#ddd 75%),linear-gradient(-45deg,transparent 75%,#ddd 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}
+  .stage.black{background:#111}.stage.white{background:#fff}.stage.gray{background:#8a8d91}.stage.navy{background:#1d2a4a}
+  .inner{position:relative;width:100%;margin:0 auto}
+  #view{display:block;width:100%;height:auto;image-rendering:auto}
+  #box{position:absolute;border:2px dashed var(--accent);background:rgba(200,16,46,.12);pointer-events:none;display:none}
+  label.f{display:block;font-size:14px;font-weight:600;margin:10px 0 4px}
+  label.f small{font-weight:400;color:var(--muted)}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  input[type=number]{width:90px;padding:9px;border:1px solid var(--line);border-radius:9px;font-size:16px}
+  .sw{width:34px;height:34px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #bbb;cursor:pointer;padding:0}
+  .sw.on{box-shadow:0 0 0 3px var(--ink)}
+  input[type=color]{width:40px;height:36px;border:1px solid var(--line);border-radius:9px;padding:2px;background:#fff}
+  .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:14px;font-weight:600}
+  .toggle small{display:block;font-weight:400;color:var(--muted)}
+  .toggle input{width:22px;height:22px;accent-color:var(--accent)}
+  .hint{font-size:13px;color:var(--muted);margin:8px 0 0;line-height:1.4}
+  .chips{display:flex;gap:6px;flex-wrap:wrap}
+  .chips button{border:1px solid var(--line);background:#fff;border-radius:99px;padding:6px 11px;font-size:13px;cursor:pointer}
+  .chips button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .stat{font-size:14px;background:#f2efe8;border-radius:10px;padding:10px 12px;margin-top:10px;line-height:1.5}
+  .grid{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:860px){.grid{grid-template-columns:1.5fr 1fr}.sticky{position:sticky;top:12px}}
+  .busy{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:50;color:#fff;font-weight:700;font-size:17px;flex-direction:column;gap:12px}
+  .busy.on{display:flex}
+  .spin{width:42px;height:42px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:s 0.8s linear infinite}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<header>
+  <h1>Image → DTF</h1>
+  <p>Remove the background, fix white areas, and export a 300 DPI transparent PNG ready for DTF printing.</p>
+</header>
+
+<main>
+  <label class="drop card" id="drop">
+    <strong>Tap to upload an image</strong>
+    <span>PNG or JPG — or drag &amp; drop it here</span>
+    <input type="file" id="file" accept="image/*" hidden>
+  </label>
+
+  <div id="editor" class="hidden grid">
+    <div>
+      <div class="card sticky">
+        <div class="row" style="justify-content:space-between;margin-bottom:10px">
+          <div class="chips" id="bgChips">
+            <button data-bg="checker" class="on">Transparent</button>
+            <button data-bg="black">Black shirt</button>
+            <button data-bg="white">White shirt</button>
+            <button data-bg="gray">Gray</button>
+            <button data-bg="navy">Navy</button>
+          </div>
+        </div>
+        <div class="stage checker" id="stage">
+          <div class="inner" id="inner">
+            <canvas id="view"></canvas>
+            <div id="box"></div>
+          </div>
+        </div>
+        <label class="f">Zoom <small id="zoomV">100%</small></label>
+        <input type="range" id="zoom" min="100" max="500" step="25" value="100">
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Fix colors</h2>
+        <div class="seg" id="tools">
+          <button data-tool="view" class="on">Look</button>
+          <button data-tool="fill">Recolor</button>
+          <button data-tool="box">Box</button>
+          <button data-tool="erase">Erase</button>
+        </div>
+        <p class="hint" id="toolHint">Pick a tool. White areas print as white ink — if you want white letters in a color, use <b>Box</b> (drag around the words) or <b>Recolor</b> (tap each letter).</p>
+        <label class="f">Color</label>
+        <div class="row" id="swatches">
+          <button class="sw on" style="background:#e3141b" data-c="#e3141b" title="Red"></button>
+          <button class="sw" style="background:#0f6b3a" data-c="#0f6b3a" title="Green"></button>
+          <button class="sw" style="background:#111111" data-c="#111111" title="Black"></button>
+          <button class="sw" style="background:#ffffff" data-c="#ffffff" title="White"></button>
+          <button class="sw" style="background:#d4a017" data-c="#d4a017" title="Gold"></button>
+          <button class="sw" style="background:#1e40af" data-c="#1e40af" title="Blue"></button>
+          <input type="color" id="color" value="#e3141b">
+        </div>
+        <label class="f">Match tolerance <small id="tolV">60</small></label>
+        <input type="range" id="tol" min="5" max="140" value="60">
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="undo">Undo</button>
+          <button class="btn" id="resetEdits">Clear edits</button>
+          <button class="btn" id="newImg">New image</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Background</h2>
+        <label class="f">Background removal strength <small id="bgTolV">40</small></label>
+        <input type="range" id="bgTol" min="5" max="120" value="40">
+        <div class="toggle"><div>Clean edges<small>Removes the white halo around the outline</small></div><input type="checkbox" id="defringe" checked></div>
+      </div>
+
+      <div class="card">
+        <h2>Print output</h2>
+        <label class="f">Print width (inches)</label>
+        <div class="row">
+          <input type="number" id="printW" value="10" min="1" max="24" step="0.25">
+          <div class="chips" id="sizeChips">
+            <button data-w="3.5">Pocket</button>
+            <button data-w="5">Youth</button>
+            <button data-w="10" class="on">Adult</button>
+            <button data-w="11">11"</button>
+            <button data-w="12">12"</button>
+          </div>
+        </div>
+        <label class="f">Sharpen <small id="sharpV">35</small></label>
+        <input type="range" id="sharp" min="0" max="100" value="35">
+        <label class="f">Color boost <small id="satV">10%</small></label>
+        <input type="range" id="sat" min="0" max="50" value="10">
+        <div class="toggle"><div>Solid edges (recommended)<small>No see-through pixels — prevents fuzzy or ghosted DTF edges</small></div><input type="checkbox" id="hard" checked></div>
+        <div class="stat" id="stat">—</div>
+      </div>
+
+      <button class="btn primary" id="export">Download DTF PNG</button>
+      <button class="btn dark hidden" id="share" style="width:100%;margin-top:8px;padding:13px">Share / Save to Files</button>
+      <p class="hint" id="done"></p>
+    </div>
+  </div>
+</main>
+
+<div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const tick = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+const clamp = v => v < 0 ? 0 : v > 255 ? 255 : v;
+
+const S = { orig: null, base: null, work: null, W: 0, H: 0, bg: [255,255,255],
+            ops: [], tool: 'view', name: 'design', color: '#e3141b', lastBlob: null };
+
+/* ---------------- loading ---------------- */
+const drop = $('#drop');
+$('#file').addEventListener('change', e => e.target.files[0] && loadFile(e.target.files[0]));
+['dragover','dragenter'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
+
+function loadFile(file) {
+  busy(true, 'Loading image…');
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = async () => {
+    let w = img.naturalWidth, h = img.naturalHeight;
+    const k = Math.min(1, 4000 / Math.max(w, h));
+    w = Math.round(w * k); h = Math.round(h * k);
+    const c = mk(w, h), x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(img, 0, 0, w, h);
+    S.orig = x.getImageData(0, 0, w, h); S.W = w; S.H = h; S.ops = [];
+    S.name = file.name.replace(/\.[^.]+$/, '') || 'design';
+    URL.revokeObjectURL(url);
+    $('#view').width = w; $('#view').height = h;
+    drop.classList.add('hidden'); $('#editor').classList.remove('hidden');
+    $('#done').textContent = ''; $('#share').classList.add('hidden');
+    await tick(); rebuildBase(); busy(false);
+  };
+  img.onerror = () => { busy(false); alert('Could not open that image. Try a PNG or JPG.'); };
+  img.src = url;
+}
+
+function mk(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function copyID(id) { return new ImageData(new Uint8ClampedArray(id.data), id.width, id.height); }
+
+/* ---------------- background removal ---------------- */
+function detectBg(d, W, H) {
+  const hist = new Map(); let clear = 0, total = 0;
+  const add = p => {
+    const i = p * 4; total++;
+    if (d[i + 3] < 16) { clear++; return; }
+    const key = (d[i] >> 3) << 10 | (d[i + 1] >> 3) << 5 | (d[i + 2] >> 3);
+    const e = hist.get(key) || [0, 0, 0, 0];
+    e[0]++; e[1] += d[i]; e[2] += d[i + 1]; e[3] += d[i + 2]; hist.set(key, e);
+  };
+  for (let x = 0; x < W; x++) { add(x); add((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { add(y * W); add(y * W + W - 1); }
+  if (clear > total * 0.5) return null; // already transparent
+  let best = null; for (const e of hist.values()) if (!best || e[0] > best[0]) best = e;
+  return [best[1] / best[0], best[2] / best[0], best[3] / best[0]].map(Math.round);
+}
+
+function removeBackground(img, tol, defringe) {
+  const d = img.data, W = img.width, H = img.height, N = W * H;
+  const bg = detectBg(d, W, H);
+  const mask = new Uint8Array(N);
+  if (!bg) { // image already has transparency
+    for (let p = 0; p < N; p++) if (d[p * 4 + 3] < 16) mask[p] = 1;
+    S.bg = [255, 255, 255];
+  } else {
+    S.bg = bg;
+    const [r, g, b] = bg, stack = new Int32Array(N); let sp = 0;
+    const ok = p => { const i = p * 4; return d[i + 3] < 16 ||
+      (Math.abs(d[i] - r) <= tol && Math.abs(d[i + 1] - g) <= tol && Math.abs(d[i + 2] - b) <= tol); };
+    const seed = p => { if (!mask[p] && ok(p)) { mask[p] = 1; stack[sp++] = p; } };
+    for (let x = 0; x < W; x++) { seed(x); seed((H - 1) * W + x); }
+    for (let y = 0; y < H; y++) { seed(y * W); seed(y * W + W - 1); }
+    while (sp) {
+      const p = stack[--sp], x = p % W;
+      if (x > 0) seed(p - 1); if (x < W - 1) seed(p + 1);
+      if (p >= W) seed(p - W); if (p < N - W) seed(p + W);
+    }
+  }
+  if (defringe) unmixEdges(d, W, H, mask, S.bg);
+  for (let p = 0; p < N; p++) if (mask[p] === 1) d[p * 4 + 3] = 0;
+}
+
+/* For pixels that border removed pixels, split the anti-aliased colour
+   into "true colour" + alpha, so no light halo remains around the art. */
+function unmixEdges(d, W, H, mask, bg, band = 2) {
+  const N = W * H, lvl = new Uint8Array(N); // 0 = interior, 1 = removed, 2.. = band
+  for (let p = 0; p < N; p++) if (mask[p] === 1) lvl[p] = 1;
+  const edge = [];
+  for (let step = 0; step < band; step++) {
+    const want = step === 0 ? 1 : step + 1, mark = step + 2, cur = [];
+    for (let p = 0; p < N; p++) {
+      if (lvl[p] !== 0 || d[p * 4 + 3] < 16) continue;
+      const x = p % W, y = (p / W) | 0;
+      let hit = false;
+      for (let dy = -1; dy <= 1 && !hit; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        if (lvl[ny * W + nx] === want) { hit = true; break; }
+      }
+      if (hit) cur.push(p);
+    }
+    for (const p of cur) { lvl[p] = mark; edge.push(p); }
+  }
+  for (const p of edge) {
+    const i = p * 4, x = p % W, y = (p / W) | 0;
+    // nearest interior colour = the "real" colour this edge pixel is a blend of
+    let F = null, bd = 1e9;
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const q = ny * W + nx;
+      if (lvl[q] !== 0 || d[q * 4 + 3] < 200) continue;
+      const dist = dx * dx + dy * dy; if (dist < bd) { bd = dist; F = q * 4; }
+    }
+    let a, col;
+    if (F !== null) {
+      let num = 0, den = 0;
+      for (let c = 0; c < 3; c++) { const fv = d[F + c] - bg[c]; num += (d[i + c] - bg[c]) * fv; den += fv * fv; }
+      a = den > 300 ? Math.max(0, Math.min(1, num / den)) : 1;
+      col = [d[F], d[F + 1], d[F + 2]];
+      if (den <= 300) col = [d[i], d[i + 1], d[i + 2]];
+    } else { // fallback: colour-to-alpha
+      a = 0;
+      for (let c = 0; c < 3; c++) { const v = d[i + c], b = bg[c];
+        const t = v > b ? (v - b) / ((255 - b) || 1) : v < b ? (b - v) / (b || 1) : 0; if (t > a) a = t; }
+      a = Math.min(1, a * 1.4);
+      col = a > 0 ? [0, 1, 2].map(c => clamp((d[i + c] - bg[c] * (1 - a)) / a)) : [0, 0, 0];
+    }
+    d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2];
+    d[i + 3] = Math.round(d[i + 3] * a);
+  }
+}
+
+/* ---------------- edit ops ---------------- */
+const lum = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+const hex2rgb = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16));
+
+function floodRegion(d, W, H, sx, sy, tol) {
+  const N = W * H, p0 = sy * W + sx, i0 = p0 * 4;
+  if (d[i0 + 3] < 16) return null;
+  const s = [d[i0], d[i0 + 1], d[i0 + 2]], mask = new Uint8Array(N), stack = new Int32Array(N); let sp = 0;
+  const ok = p => { const i = p * 4; return d[i + 3] >= 16 &&
+    Math.abs(d[i] - s[0]) <= tol && Math.abs(d[i + 1] - s[1]) <= tol && Math.abs(d[i + 2] - s[2]) <= tol; };
+  mask[p0] = 1; stack[sp++] = p0;
+  while (sp) {
+    const p = stack[--sp], x = p % W;
+    const n = [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W];
+    for (const q of n) if (q >= 0 && q < N && !mask[q] && ok(q)) { mask[q] = 1; stack[sp++] = q; }
+  }
+  return { mask, seed: s };
+}
+
+/* Box: recolor every white shape that sits completely inside the box.
+   White shapes that run outside the box (e.g. light parts of the background art) are left alone. */
+function boxRegion(d, W, H, x0, y0, x1, y1, tol) {
+  const N = W * H, lim = 255 - tol, mask = new Uint8Array(N), seen = new Uint8Array(N), stack = new Int32Array(N);
+  const white = p => { const i = p * 4; return d[i + 3] >= 16 && d[i] >= lim && d[i + 1] >= lim && d[i + 2] >= lim; };
+  let n = 0;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const p0 = y * W + x;
+    if (seen[p0] || !white(p0)) continue;
+    let sp = 0, inside = true; const comp = [];
+    seen[p0] = 1; stack[sp++] = p0;
+    while (sp) {
+      const p = stack[--sp], px = p % W, py = (p / W) | 0; comp.push(p);
+      if (px < x0 || px > x1 || py < y0 || py > y1) inside = false;
+      const nb = [px > 0 ? p - 1 : -1, px < W - 1 ? p + 1 : -1, p - W, p + W];
+      for (const q of nb) if (q >= 0 && q < N && !seen[q] && white(q)) { seen[q] = 1; stack[sp++] = q; }
+    }
+    if (inside) { for (const p of comp) mask[p] = 1; n += comp.length; }
+  }
+  return n ? { mask, seed: [255, 255, 255], rect: [x0, y0, x1, y1] } : null;
+}
+
+function recolor(d, W, H, region, target) {
+  const { mask, seed } = region, N = W * H, sl = Math.max(1, lum(...seed));
+  // grow 1px into the anti-aliased border so no light rim is left behind
+  const grow = [];
+  for (let p = 0; p < N; p++) {
+    if (mask[p] || d[p * 4 + 3] < 16) continue;
+    const x = p % W;
+    if ((x > 0 && mask[p - 1] === 1) || (x < W - 1 && mask[p + 1] === 1) ||
+        (p >= W && mask[p - W] === 1) || (p < N - W && mask[p + W] === 1)) {
+      const i = p * 4; if (lum(d[i], d[i + 1], d[i + 2]) > 70) grow.push(p);
+    }
+  }
+  for (const p of grow) mask[p] = 2;
+  for (let p = 0; p < N; p++) {
+    if (!mask[p]) continue;
+    const i = p * 4, f = Math.min(1.12, lum(d[i], d[i + 1], d[i + 2]) / sl);
+    if (mask[p] === 1) { d[i] = clamp(target[0] * f); d[i + 1] = clamp(target[1] * f); d[i + 2] = clamp(target[2] * f); }
+    else { // blend edge pixel between its dark neighbour and the new colour
+      const t = Math.max(0, Math.min(1, f));
+      for (let c = 0; c < 3; c++) d[i + c] = clamp(d[i + c] * (1 - t) + target[c] * t * 0.85);
+    }
+  }
+}
+
+function applyOp(img, op) {
+  const d = img.data, W = img.width, H = img.height;
+  if (op.type === 'box') {
+    const r = boxRegion(d, W, H, op.x0, op.y0, op.x1, op.y1, op.tol);
+    if (r) recolor(d, W, H, r, hex2rgb(op.color));
+    return !!r;
+  }
+  const r = floodRegion(d, W, H, op.x, op.y, op.tol);
+  if (!r) return false;
+  if (op.type === 'fill') recolor(d, W, H, r, hex2rgb(op.color));
+  else { unmixEdges(d, W, H, r.mask, r.seed, 1); for (let p = 0; p < W * H; p++) if (r.mask[p] === 1) d[p * 4 + 3] = 0; }
+  return true;
+}
+
+function rebuildBase() {
+  S.base = copyID(S.orig);
+  removeBackground(S.base, +$('#bgTol').value, $('#defringe').checked);
+  replay();
+}
+function replay() {
+  S.work = copyID(S.base);
+  for (const op of S.ops) applyOp(S.work, op);
+  render();
+}
+
+/* ---------------- render ---------------- */
+function saturate(id, amt) {
+  if (!amt) return id;
+  const d = id.data, k = 1 + amt;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const g = lum(d[i], d[i + 1], d[i + 2]);
+    d[i] = clamp(g + (d[i] - g) * k); d[i + 1] = clamp(g + (d[i + 1] - g) * k); d[i + 2] = clamp(g + (d[i + 2] - g) * k);
+  }
+  return id;
+}
+function render() {
+  const out = saturate(copyID(S.work), +$('#sat').value / 100);
+  $('#view').getContext('2d').putImageData(out, 0, 0);
+  updateStat();
+}
+function updateStat() {
+  if (!S.W) return;
+  const inW = Math.max(1, +$('#printW').value || 10);
+  const pw = Math.round(inW * 300), ph = Math.round(pw * S.H / S.W);
+  const scale = pw / S.W;
+  $('#stat').innerHTML = `Output: <b>${pw} × ${ph} px</b> at 300 DPI<br>Print size: <b>${inW}" × ${(ph / 300).toFixed(2)}"</b><br>` +
+    `Source: ${S.W} × ${S.H} px (${scale >= 1 ? 'upscaled ' + scale.toFixed(1) + '×' : 'downscaled'})` +
+    (scale > 4 ? '<br><span style="color:#b45309">Big jump in size — for the sharpest print, start from a larger image.</span>' : '');
+}
+
+/* ---------------- interaction ---------------- */
+const hints = {
+  view: 'Pick a tool. White areas print as white ink — if you want white letters in a color, use <b>Box</b> (drag around the words) or <b>Recolor</b> (tap each letter).',
+  fill: '<b>Recolor:</b> tap an area to fill it with the selected color (shading is kept). Zoom in for small letters.',
+  box: '<b>Box:</b> drag a box around white text — every white shape fully inside the box turns the selected color. Shapes that stick out of the box are left alone, so draw it a little bigger than the words.',
+  erase: '<b>Erase:</b> tap an area to make it transparent — great for leftover background inside loops and gaps.'
+};
+$$('#tools button').forEach(b => b.onclick = () => {
+  S.tool = b.dataset.tool;
+  $$('#tools button').forEach(x => x.classList.toggle('on', x === b));
+  $('#toolHint').innerHTML = hints[S.tool];
+  $('#view').style.touchAction = S.tool === 'box' ? 'none' : 'manipulation';
+  $('#view').style.cursor = S.tool === 'view' ? 'default' : 'crosshair';
+});
+$$('#swatches .sw').forEach(b => b.onclick = () => setColor(b.dataset.c));
+$('#color').oninput = e => setColor(e.target.value);
+function setColor(c) {
+  S.color = c; $('#color').value = c;
+  $$('#swatches .sw').forEach(x => x.classList.toggle('on', x.dataset.c === c));
+}
+$$('#bgChips button').forEach(b => b.onclick = () => {
+  $$('#bgChips button').forEach(x => x.classList.toggle('on', x === b));
+  $('#stage').className = 'stage ' + b.dataset.bg;
+});
+$('#zoom').oninput = e => { $('#inner').style.width = e.target.value + '%'; $('#zoomV').textContent = e.target.value + '%'; };
+$('#tol').oninput = e => $('#tolV').textContent = e.target.value;
+
+const view = $('#view'), boxEl = $('#box');
+let drag = null;
+function toImg(e) {
+  const r = view.getBoundingClientRect();
+  return [Math.max(0, Math.min(S.W - 1, Math.floor((e.clientX - r.left) / r.width * S.W))),
+          Math.max(0, Math.min(S.H - 1, Math.floor((e.clientY - r.top) / r.height * S.H)))];
+}
+view.addEventListener('pointerdown', e => {
+  if (S.tool === 'view') return;
+  drag = { cx: e.clientX, cy: e.clientY, p: toImg(e) };
+  if (S.tool === 'box') { view.setPointerCapture(e.pointerId); e.preventDefault(); }
+});
+view.addEventListener('pointermove', e => {
+  if (!drag || S.tool !== 'box') return;
+  const r = view.getBoundingClientRect();
+  const x0 = Math.min(drag.cx, e.clientX) - r.left, y0 = Math.min(drag.cy, e.clientY) - r.top;
+  Object.assign(boxEl.style, { display: 'block', left: x0 + 'px', top: y0 + 'px',
+    width: Math.abs(e.clientX - drag.cx) + 'px', height: Math.abs(e.clientY - drag.cy) + 'px' });
+});
+view.addEventListener('pointercancel', () => { drag = null; boxEl.style.display = 'none'; });
+view.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const moved = Math.hypot(e.clientX - drag.cx, e.clientY - drag.cy), tol = +$('#tol').value;
+  boxEl.style.display = 'none';
+  let op = null;
+  if (S.tool === 'box') {
+    const q = toImg(e);
+    if (moved > 6) op = { type: 'box', x0: Math.min(drag.p[0], q[0]), y0: Math.min(drag.p[1], q[1]),
+                          x1: Math.max(drag.p[0], q[0]), y1: Math.max(drag.p[1], q[1]), tol, color: S.color };
+  } else if (moved < 10) {
+    op = { type: S.tool, x: drag.p[0], y: drag.p[1], tol, color: S.color };
+  }
+  drag = null;
+  if (op) {
+    const test = copyID(S.work);
+    if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
+    else toast(op.type === 'box' ? 'No white found in that box.' : 'That spot is already transparent.');
+  }
+});
+function toast(m) { const h = $('#toolHint'); const old = h.innerHTML; h.innerHTML = '<b style="color:#c8102e">' + m + '</b>'; setTimeout(() => h.innerHTML = hints[S.tool] || old, 1800); }
+
+$('#undo').onclick = () => { if (S.ops.length) { S.ops.pop(); replay(); } };
+$('#resetEdits').onclick = () => { if (S.ops.length && confirm('Remove all color edits?')) { S.ops = []; replay(); } };
+$('#newImg').onclick = () => { $('#editor').classList.add('hidden'); drop.classList.remove('hidden'); $('#file').value = ''; };
+
+let bgTimer;
+$('#bgTol').oninput = e => { $('#bgTolV').textContent = e.target.value; clearTimeout(bgTimer); bgTimer = setTimeout(rebuildBase, 250); };
+$('#defringe').onchange = rebuildBase;
+$('#sat').oninput = e => { $('#satV').textContent = e.target.value + '%'; render(); };
+$('#sharp').oninput = e => $('#sharpV').textContent = e.target.value;
+$('#printW').oninput = () => { $$('#sizeChips button').forEach(x => x.classList.toggle('on', +x.dataset.w === +$('#printW').value)); updateStat(); };
+$$('#sizeChips button').forEach(b => b.onclick = () => { $('#printW').value = b.dataset.w; $('#printW').oninput(); });
+
+/* ---------------- export ---------------- */
+function sharpen(id, amt) {
+  if (!amt) return;
+  const d = id.data, W = id.width, H = id.height, src = new Uint8ClampedArray(d);
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const i = (y * W + x) * 4;
+    if (src[i + 3] < 255) continue;
+    const up = i - W * 4, dn = i + W * 4;
+    if (src[up + 3] < 255 || src[dn + 3] < 255 || src[i - 1] < 255 || src[i + 7] < 255) continue;
+    for (let c = 0; c < 3; c++) {
+      const blur = (src[up + c - 4] + src[up + c] + src[up + c + 4] + src[i + c - 4] + src[i + c] + src[i + c + 4] +
+                    src[dn + c - 4] + src[dn + c] + src[dn + c + 4]) / 9;
+      d[i + c] = clamp(src[i + c] + (src[i + c] - blur) * amt);
+    }
+  }
+}
+
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(buf) { let c = 0xffffffff; for (let i = 0; i < buf.length; i++) c = CRC[(c ^ buf[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function setDpi(png, dpi) {
+  const dv = new DataView(png.buffer, png.byteOffset), parts = [png.subarray(0, 8)]; let p = 8, ihdrDone = false;
+  const ppm = Math.round(dpi / 0.0254);
+  const phys = new Uint8Array(21), pv = new DataView(phys.buffer);
+  pv.setUint32(0, 9); phys.set([112, 72, 89, 115], 4); pv.setUint32(8, ppm); pv.setUint32(12, ppm); phys[16] = 1;
+  pv.setUint32(17, crc32(phys.subarray(4, 17)));
+  while (p < png.length) {
+    const len = dv.getUint32(p), type = String.fromCharCode(png[p + 4], png[p + 5], png[p + 6], png[p + 7]), end = p + 12 + len;
+    if (type !== 'pHYs') parts.push(png.subarray(p, end));
+    if (type === 'IHDR' && !ihdrDone) { parts.push(phys); ihdrDone = true; }
+    p = end;
+  }
+  return new Blob(parts, { type: 'image/png' });
+}
+
+async function buildPNG() {
+  const inW = Math.max(1, Math.min(24, +$('#printW').value || 10));
+  const tw = Math.round(inW * 300), th = Math.round(tw * S.H / S.W);
+  if (tw * th > 40e6) throw new Error('That size is too large for the browser. Try a smaller print width.');
+  let src = mk(S.W, S.H);
+  src.getContext('2d').putImageData(saturate(copyID(S.work), +$('#sat').value / 100), 0, 0);
+  let cw = S.W, ch = S.H;
+  while (cw * 2 < tw) { // step up in 2× passes for smoother, cleaner enlargement
+    const n = mk(cw * 2, ch * 2), x = n.getContext('2d');
+    x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+    x.drawImage(src, 0, 0, cw * 2, ch * 2); src = n; cw *= 2; ch *= 2;
+    await tick();
+  }
+  const out = mk(tw, th), ox = out.getContext('2d', { willReadFrequently: true });
+  ox.imageSmoothingEnabled = true; ox.imageSmoothingQuality = 'high';
+  ox.drawImage(src, 0, 0, tw, th);
+  const id = ox.getImageData(0, 0, tw, th);
+  sharpen(id, (+$('#sharp').value / 100) * 1.2);
+  if ($('#hard').checked) { const d = id.data; for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 128 ? 255 : 0; }
+  ox.putImageData(id, 0, 0);
+  const blob = await new Promise(r => out.toBlob(r, 'image/png'));
+  const withDpi = setDpi(new Uint8Array(await blob.arrayBuffer()), 300);
+  return { blob: withDpi, tw, th, inW };
+}
+
+$('#export').onclick = async () => {
+  try {
+    busy(true, 'Building your 300 DPI PNG…'); await tick();
+    const { blob, tw, th, inW } = await buildPNG();
+    const fname = `${S.name}_DTF_${inW}in_300dpi.png`;
+    S.lastBlob = blob; S.lastName = fname;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    $('#done').innerHTML = `Saved <b>${fname}</b> — ${tw} × ${th} px, ${(blob.size / 1048576).toFixed(1)} MB, 300 DPI, transparent.`;
+    const f = new File([blob], fname, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [f] })) $('#share').classList.remove('hidden');
+  } catch (err) { alert(err.message || err); }
+  finally { busy(false); }
+};
+$('#share').onclick = async () => {
+  if (!S.lastBlob) return;
+  try { await navigator.share({ files: [new File([S.lastBlob], S.lastName, { type: 'image/png' })], title: S.lastName }); } catch (e) {}
+};
+
+function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
+
+window.__dtf = { S, buildPNG, applyOp, replay, render }; // for testing
+})();
+</script>
+</body>
+</html>
