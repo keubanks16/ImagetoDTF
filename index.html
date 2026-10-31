@@ -134,6 +134,8 @@
         </div>
         <label class="f">Match tolerance <small id="tolV">60</small></label>
         <input type="range" id="tol" min="5" max="140" value="60">
+        <div class="toggle"><div>Change every matching spot<small>Recolor/Erase hits that color everywhere, not just the piece you tap</small></div><input type="checkbox" id="allMatch" checked></div>
+        <div class="toggle"><div>Keep shading<small>Off = solid, clean color (best for logos and text)</small></div><input type="checkbox" id="shade"></div>
         <div class="row" style="margin-top:10px">
           <button class="btn" id="undo">Undo</button>
           <button class="btn" id="resetEdits">Clear edits</button>
@@ -317,19 +319,20 @@ function unmixEdges(d, W, H, mask, bg, band = 2) {
 const lum = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
 const hex2rgb = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16));
 
-function floodRegion(d, W, H, sx, sy, tol) {
+function floodRegion(d, W, H, sx, sy, tol, all) {
   const N = W * H, p0 = sy * W + sx, i0 = p0 * 4;
   if (d[i0 + 3] < 16) return null;
   const s = [d[i0], d[i0 + 1], d[i0 + 2]], mask = new Uint8Array(N), stack = new Int32Array(N); let sp = 0;
   const ok = p => { const i = p * 4; return d[i + 3] >= 16 &&
     Math.abs(d[i] - s[0]) <= tol && Math.abs(d[i + 1] - s[1]) <= tol && Math.abs(d[i + 2] - s[2]) <= tol; };
+  if (all) { for (let p = 0; p < N; p++) if (ok(p)) mask[p] = 1; return { mask, seed: s, tol }; }
   mask[p0] = 1; stack[sp++] = p0;
   while (sp) {
     const p = stack[--sp], x = p % W;
     const n = [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W];
     for (const q of n) if (q >= 0 && q < N && !mask[q] && ok(q)) { mask[q] = 1; stack[sp++] = q; }
   }
-  return { mask, seed: s };
+  return { mask, seed: s, tol };
 }
 
 /* Box: recolor every white shape that sits completely inside the box.
@@ -351,29 +354,52 @@ function boxRegion(d, W, H, x0, y0, x1, y1, tol) {
     }
     if (inside) { for (const p of comp) mask[p] = 1; n += comp.length; }
   }
-  return n ? { mask, seed: [255, 255, 255], rect: [x0, y0, x1, y1] } : null;
+  return n ? { mask, seed: [255, 255, 255], tol } : null;
 }
 
-function recolor(d, W, H, region, target) {
-  const { mask, seed } = region, N = W * H, sl = Math.max(1, lum(...seed));
-  // grow 1px into the anti-aliased border so no light rim is left behind
-  const grow = [];
-  for (let p = 0; p < N; p++) {
-    if (mask[p] || d[p * 4 + 3] < 16) continue;
-    const x = p % W;
-    if ((x > 0 && mask[p - 1] === 1) || (x < W - 1 && mask[p + 1] === 1) ||
-        (p >= W && mask[p - W] === 1) || (p < N - W && mask[p + W] === 1)) {
-      const i = p * 4; if (lum(d[i], d[i + 1], d[i + 2]) > 70) grow.push(p);
+/* Recolor a region with a solid colour. Edge pixels (anti-aliasing / JPEG fuzz between the
+   region and its neighbours) are un-mixed so the new colour blends cleanly into whatever is next to it. */
+function recolor(d, W, H, region, target, shade) {
+  const { mask, seed } = region, N = W * H, src = new Uint8ClampedArray(d), sl = lum(...seed);
+  const lim = Math.max(40, (region.tol || 60) * 1.4); // a neighbour only counts as 'other colour' if clearly different
+  const far = j => Math.max(Math.abs(src[j] - seed[0]), Math.abs(src[j + 1] - seed[1]), Math.abs(src[j + 2] - seed[2])) > lim;
+  const lvl = new Uint8Array(N); // 1 = region, 2/3 = edge ring
+  for (let p = 0; p < N; p++) if (mask[p]) lvl[p] = 1;
+  for (let ring = 2; ring <= 4; ring++) {
+    const add = [];
+    for (let p = 0; p < N; p++) {
+      if (lvl[p] || src[p * 4 + 3] < 16) continue;
+      const x = p % W, y = (p / W) | 0; let hit = false;
+      for (let dy = -1; dy <= 1 && !hit; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < W && ny < H && lvl[ny * W + nx] === ring - 1) { hit = true; break; }
+      }
+      if (hit) add.push(p);
     }
+    for (const p of add) lvl[p] = ring;
   }
-  for (const p of grow) mask[p] = 2;
   for (let p = 0; p < N; p++) {
-    if (!mask[p]) continue;
-    const i = p * 4, f = Math.min(1.12, lum(d[i], d[i + 1], d[i + 2]) / sl);
-    if (mask[p] === 1) { d[i] = clamp(target[0] * f); d[i + 1] = clamp(target[1] * f); d[i + 2] = clamp(target[2] * f); }
-    else { // blend edge pixel between its dark neighbour and the new colour
-      const t = Math.max(0, Math.min(1, f));
-      for (let c = 0; c < 3; c++) d[i + c] = clamp(d[i + c] * (1 - t) + target[c] * t * 0.85);
+    if (!lvl[p]) continue;
+    const i = p * 4, x = p % W, y = (p / W) | 0;
+    // nearest solid pixel that is NOT part of the region or its edge = the "other" colour
+    let n = -1, bd = 99;
+    for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const q = ny * W + nx, dd = dx * dx + dy * dy;
+      if (dd < bd && !lvl[q] && src[q * 4 + 3] >= 200 && far(q * 4)) { bd = dd; n = q * 4; }
+    }
+    let a = 1;
+    if (n >= 0) {
+      let num = 0, den = 0;
+      for (let c = 0; c < 3; c++) { const v = seed[c] - src[n + c]; num += (src[i + c] - src[n + c]) * v; den += v * v; }
+      a = den > 200 ? Math.max(0, Math.min(1, num / den)) : (lvl[p] === 1 ? 1 : 0);
+    } else if (lvl[p] !== 1) a = 0;
+    if (a <= 0) continue;
+    const sh = shade && lvl[p] === 1 && n < 0 ? (lum(src[i], src[i + 1], src[i + 2]) - sl) * 0.6 : 0;
+    for (let c = 0; c < 3; c++) {
+      const other = n >= 0 ? src[n + c] : src[i + c];
+      d[i + c] = clamp((target[c] + sh) * a + other * (1 - a));
     }
   }
 }
@@ -382,12 +408,12 @@ function applyOp(img, op) {
   const d = img.data, W = img.width, H = img.height;
   if (op.type === 'box') {
     const r = boxRegion(d, W, H, op.x0, op.y0, op.x1, op.y1, op.tol);
-    if (r) recolor(d, W, H, r, hex2rgb(op.color));
+    if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
     return !!r;
   }
-  const r = floodRegion(d, W, H, op.x, op.y, op.tol);
+  const r = floodRegion(d, W, H, op.x, op.y, op.tol, op.all);
   if (!r) return false;
-  if (op.type === 'fill') recolor(d, W, H, r, hex2rgb(op.color));
+  if (op.type === 'fill') recolor(d, W, H, r, hex2rgb(op.color), op.shade);
   else { unmixEdges(d, W, H, r.mask, r.seed, 1); for (let p = 0; p < W * H; p++) if (r.mask[p] === 1) d[p * 4 + 3] = 0; }
   return true;
 }
@@ -484,9 +510,9 @@ view.addEventListener('pointerup', e => {
   if (S.tool === 'box') {
     const q = toImg(e);
     if (moved > 6) op = { type: 'box', x0: Math.min(drag.p[0], q[0]), y0: Math.min(drag.p[1], q[1]),
-                          x1: Math.max(drag.p[0], q[0]), y1: Math.max(drag.p[1], q[1]), tol, color: S.color };
+                          x1: Math.max(drag.p[0], q[0]), y1: Math.max(drag.p[1], q[1]), tol, color: S.color, shade: $('#shade').checked };
   } else if (moved < 10) {
-    op = { type: S.tool, x: drag.p[0], y: drag.p[1], tol, color: S.color };
+    op = { type: S.tool, x: drag.p[0], y: drag.p[1], tol, color: S.color, all: $('#allMatch').checked, shade: $('#shade').checked };
   }
   drag = null;
   if (op) {
