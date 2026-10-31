@@ -43,6 +43,8 @@
   .sw{width:34px;height:34px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #bbb;cursor:pointer;padding:0}
   .sw.on{box-shadow:0 0 0 3px var(--ink)}
   input[type=color]{width:40px;height:36px;border:1px solid var(--line);border-radius:9px;padding:2px;background:#fff}
+  .pick{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:10px;padding:3px 10px 3px 3px;font-size:14px;font-weight:600;cursor:pointer;background:#fff}
+  .pick input{border:0}
   .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:14px;font-weight:600}
   .toggle small{display:block;font-weight:400;color:var(--muted)}
   .toggle input{width:22px;height:22px;accent-color:var(--accent)}
@@ -114,7 +116,9 @@
           <button class="sw" style="background:#ffffff" data-c="#ffffff" title="White"></button>
           <button class="sw" style="background:#d4a017" data-c="#d4a017" title="Gold"></button>
           <button class="sw" style="background:#1e40af" data-c="#1e40af" title="Blue"></button>
-          <input type="color" id="color" value="#e3141b">
+          <button class="sw" style="background:#559bcb" data-c="#559bcb" title="Light blue"></button>
+          <button class="sw" style="background:#192649" data-c="#192649" title="Navy"></button>
+          <label class="pick"><input type="color" id="color" value="#e3141b"><span>Pick color</span></label>
         </div>
         <label class="f">Match tolerance <small id="tolV">60</small></label>
         <input type="range" id="tol" min="5" max="140" value="60">
