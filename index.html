@@ -594,12 +594,40 @@ async function buildPNG() {
   return { blob: withDpi, tw, th, inW };
 }
 
+/* ---------------- iPhone app (Capacitor) ---------------- */
+const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+if (NATIVE) {
+  document.documentElement.classList.add('native');
+  $('#drop span').textContent = 'PNG or JPG from Photos or Files';
+  $('#export').textContent = 'Save DTF PNG';
+}
+const blobToB64 = blob => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result).split(',')[1]);
+  r.onerror = () => rej(r.error); r.readAsDataURL(blob);
+});
+async function nativeSave(blob, fname) {
+  const { Filesystem, Share } = Capacitor.Plugins;
+  const data = await blobToB64(blob);
+  const { uri } = await Filesystem.writeFile({ path: fname, data, directory: 'CACHE' });
+  try { await Share.share({ title: fname, files: [uri] }); }
+  catch (e) { if (!/cancel/i.test(e && e.message || '')) throw e; }
+}
+
 $('#export').onclick = async () => {
   try {
     busy(true, 'Building your 300 DPI PNG…'); await tick();
     const { blob, tw, th, inW } = await buildPNG();
     const fname = `${S.name}_DTF_${inW}in_300dpi.png`;
     S.lastBlob = blob; S.lastName = fname;
+    const info = `${tw} × ${th} px, ${(blob.size / 1048576).toFixed(1)} MB, 300 DPI, transparent.`;
+    if (NATIVE) {
+      busy(false);
+      $('#done').innerHTML = `<b>${fname}</b> — ${info} Choose <b>Save to Files</b> to keep the full 300 DPI file.`;
+      $('#share').classList.remove('hidden');
+      await nativeSave(blob, fname);
+      return;
+    }
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
@@ -611,6 +639,7 @@ $('#export').onclick = async () => {
 };
 $('#share').onclick = async () => {
   if (!S.lastBlob) return;
+  if (NATIVE) { try { await nativeSave(S.lastBlob, S.lastName); } catch (e) { alert(e.message || e); } return; }
   try { await navigator.share({ files: [new File([S.lastBlob], S.lastName, { type: 'image/png' })], title: S.lastName }); } catch (e) {}
 };
 
