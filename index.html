@@ -144,6 +144,7 @@
           <button data-tool="erase">Erase</button>
         </div>
         <p class="hint" id="toolHint">Pick a tool. White areas print as white ink — if you want white letters in a color, use <b>Box</b> (drag around the words) or <b>Recolor</b> (tap each letter).</p>
+        <button class="btn" id="outlineBtn" style="width:100%;margin-top:10px">Remove white outline</button>
         <label class="f">Color</label>
         <div class="row" id="swatches">
           <button class="sw" style="background:#192649" data-c="#192649" title="GS Navy"></button>
@@ -359,6 +360,29 @@ function floodRegion(d, W, H, sx, sy, tol, all) {
   return { mask, seed: s, tol };
 }
 
+/* Outline: every white/near-white area that touches the transparent background
+   (the white outline or stroke around a logo). White inside the design that doesn't touch
+   the background, like white letters, is kept. */
+function outlineRegion(d, W, H, tol) {
+  const N = W * H, lim = 255 - Math.max(tol, 70), mask = new Uint8Array(N), stack = new Int32Array(N); let sp = 0, n = 0;
+  const light = p => { const i = p * 4; return d[i + 3] >= 16 && d[i] >= lim && d[i + 1] >= lim && d[i + 2] >= lim; };
+  const clear = p => d[p * 4 + 3] < 16;
+  for (let p = 0; p < N; p++) {
+    if (mask[p] || !light(p)) continue;
+    const x = p % W, y = (p / W) | 0;
+    const edge = x === 0 || y === 0 || x === W - 1 || y === H - 1 ||
+      clear(p - 1) || clear(p + 1) || clear(p - W) || clear(p + W);
+    if (!edge) continue;
+    mask[p] = 1; stack[sp++] = p;
+    while (sp) {
+      const q = stack[--sp], qx = q % W; n++;
+      const nb = [qx > 0 ? q - 1 : -1, qx < W - 1 ? q + 1 : -1, q - W, q + W];
+      for (const r of nb) if (r >= 0 && r < N && !mask[r] && light(r)) { mask[r] = 1; stack[sp++] = r; }
+    }
+  }
+  return n ? { mask, seed: [255, 255, 255], tol } : null;
+}
+
 /* Box: recolor every white shape that sits completely inside the box.
    White shapes that run outside the box (e.g. light parts of the background art) are left alone. */
 function boxRegion(d, W, H, x0, y0, x1, y1, tol) {
@@ -435,6 +459,13 @@ function applyOp(img, op) {
     if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
     return !!r;
   }
+  if (op.type === 'outline') {
+    const r = outlineRegion(d, W, H, op.tol);
+    if (!r) return false;
+    unmixEdges(d, W, H, r.mask, r.seed, 1);
+    for (let p = 0; p < W * H; p++) if (r.mask[p] === 1) d[p * 4 + 3] = 0;
+    return true;
+  }
   const r = floodRegion(d, W, H, op.x, op.y, op.tol, op.all);
   if (!r) return false;
   if (op.type === 'fill') recolor(d, W, H, r, hex2rgb(op.color), op.shade);
@@ -485,7 +516,7 @@ const hints = {
   view: 'Pick a tool. White areas print as white ink — if you want white letters in a color, use <b>Box</b> (drag around the words) or <b>Recolor</b> (tap each letter).',
   fill: '<b>Recolor:</b> tap an area to fill it with the selected color (shading is kept). Zoom in for small letters.',
   box: '<b>Box:</b> drag a box around white text — every white shape fully inside the box turns the selected color. Shapes that stick out of the box are left alone, so draw it a little bigger than the words.',
-  erase: '<b>Erase:</b> tap an area to make it transparent — great for leftover background inside loops and gaps.'
+  erase: '<b>Erase:</b> tap an area to make it transparent — great for leftover background and white outlines. Taps snap to nearby white, so you don\'t have to hit thin lines exactly.'
 };
 $$('#tools button').forEach(b => b.onclick = () => {
   S.tool = b.dataset.tool;
@@ -683,6 +714,7 @@ view.addEventListener('pointerup', e => {
     if (moved > 6) op = { type: 'box', x0: Math.min(drag.p[0], q[0]), y0: Math.min(drag.p[1], q[1]),
                           x1: Math.max(drag.p[0], q[0]), y1: Math.max(drag.p[1], q[1]), tol, color: S.color, shade: $('#shade').checked };
   } else if (moved < 10) {
+    if (S.tool === 'erase') drag.p = snapTap(drag.p, view.getBoundingClientRect());
     op = { type: S.tool, x: drag.p[0], y: drag.p[1], tol, color: S.color, all: $('#allMatch').checked, shade: $('#shade').checked };
   }
   drag = null;
@@ -692,6 +724,26 @@ view.addEventListener('pointerup', e => {
     else toast(op.type === 'box' ? 'No white found in that box.' : 'That spot is already transparent.');
   }
 });
+// Thin outlines are hard to hit with a finger: if there's white within ~16 screen px of the tap,
+// erase that; otherwise use the tapped pixel, or the nearest non-transparent pixel.
+function snapTap([x, y], rect) {
+  const d = S.work.data, W = S.W, H = S.H, R = Math.max(2, Math.round(16 * W / rect.width));
+  const a = p => d[p * 4 + 3], white = p => a(p) >= 16 && d[p * 4] >= 215 && d[p * 4 + 1] >= 215 && d[p * 4 + 2] >= 215;
+  let bestW = null, bw = 1e9, bestO = null, bo = 1e9;
+  for (let j = -R; j <= R; j++) for (let i = -R; i <= R; i++) {
+    const xx = x + i, yy = y + j, dd = i * i + j * j;
+    if (xx < 0 || yy < 0 || xx >= W || yy >= H || dd > R * R) continue;
+    const p = yy * W + xx;
+    if (white(p) && dd < bw) { bw = dd; bestW = [xx, yy]; }
+    if (a(p) >= 16 && dd < bo) { bo = dd; bestO = [xx, yy]; }
+  }
+  return bestW || (a(y * W + x) >= 16 ? [x, y] : bestO) || [x, y];
+}
+$('#outlineBtn').onclick = () => {
+  const op = { type: 'outline', tol: +$('#tol').value }, test = copyID(S.work);
+  if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
+  else toast('No white outline found around the design.');
+};
 function toast(m) { const h = $('#toolHint'); const old = h.innerHTML; h.innerHTML = '<b style="color:#c0262d">' + m + '</b>'; setTimeout(() => h.innerHTML = hints[S.tool] || old, 1800); }
 
 $('#undo').onclick = () => { if (S.ops.length) { S.ops.pop(); replay(); } };
