@@ -1,7 +1,8 @@
 name: iOS build → App Store Connect
 
 # Run manually: GitHub → Actions → "iOS build → App Store Connect" → Run workflow.
-# Builds the iPhone app on a cloud Mac, signs it, and uploads it to App Store Connect (TestFlight).
+# Builds the iPhone app on a cloud Mac, signs it, uploads it to App Store Connect (TestFlight),
+# then (if "Submit for App Review" is checked) waits for processing and submits it for review.
 #
 # Repo secrets needed (Settings → Secrets and variables → Actions):
 #   APPLE_TEAM_ID        10-character Team ID (developer.apple.com → Membership)
@@ -16,11 +17,19 @@ on:
         description: "App version shown in the App Store"
         default: "1.0"
         required: true
+      submit_for_review:
+        description: "Submit for App Review after upload"
+        type: boolean
+        default: true
+      whats_new:
+        description: "What's New text (used for updates after the first release)"
+        default: "Bug fixes and improvements."
+        required: false
 
 jobs:
   ios:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
 
@@ -90,6 +99,20 @@ jobs:
             -authenticationKeyPath ~/private_keys/AuthKey.p8 \
             -authenticationKeyID "${{ secrets.ASC_KEY_ID }}" \
             -authenticationKeyIssuerID "${{ secrets.ASC_ISSUER_ID }}"
+
+      - name: Submit for App Review
+        if: ${{ github.event.inputs.submit_for_review == 'true' }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_PATH: ~/private_keys/AuthKey.p8
+          BUNDLE_ID: com.stingerzbaseball.gsdtf
+          APP_VERSION: ${{ github.event.inputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          WHATS_NEW: ${{ github.event.inputs.whats_new }}
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography 2>/dev/null || python3 -m pip install --quiet pyjwt cryptography
+          python3 scripts/asc_submit.py
 
       - name: Clean up key
         if: always()

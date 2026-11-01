@@ -23,4 +23,5 @@ No Mac is needed. The GitHub Actions workflow **iOS build → App Store Connect*
 - `scripts/build-web.sh`: copies the web app into `www/`
 - `scripts/ios-setup.sh`: sets permissions, the icon and launch screen, and iPhone-only mode
 - `ios-assets/`: 1024 px app icon and launch screen
+- `scripts/asc_submit.py`: after the upload, waits for Apple to process the build, attaches it to the version and submits it for App Review (the workflow's "Submit for App Review" checkbox)
 - `privacy.html`: privacy policy and support page (needed for the App Store listing)
