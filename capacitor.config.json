@@ -1,0 +1,10 @@
+{
+  "appId": "com.stingerzbaseball.gsdtf",
+  "appName": "GS DTF",
+  "webDir": "www",
+  "backgroundColor": "#192649",
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#192649"
+  }
+}
