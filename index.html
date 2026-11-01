@@ -69,6 +69,12 @@
   .busy.on{display:flex}
   .spin{width:42px;height:42px;border:4px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:s 0.8s linear infinite}
   @keyframes s{to{transform:rotate(360deg)}}
+  .shirtBox{border-radius:12px;border:1px solid var(--line);background:linear-gradient(#f7fafd,#e6edf5);overflow:hidden}
+  #shirt{display:block;width:100%;height:auto}
+  .sgrp{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .sgrp b{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);width:62px}
+  .stat .warn{color:#b45309;font-weight:600}
+  .linkbtn{border:0;background:none;color:#2f6f9e;font-weight:600;text-decoration:underline;padding:0;cursor:pointer;font-size:14px}
   .hidden{display:none!important}
 </style>
 </head>
@@ -90,6 +96,10 @@
   <div id="editor" class="hidden grid">
     <div>
       <div class="card sticky">
+        <div class="seg" id="viewMode" style="margin-bottom:10px">
+          <button data-m="edit" class="on">Edit design</button>
+          <button data-m="shirt">See on shirt</button>
+        </div>
         <div class="row" style="justify-content:space-between;margin-bottom:10px">
           <div class="chips" id="bgChips">
             <button data-bg="checker" class="on">Transparent</button>
@@ -105,8 +115,22 @@
             <div id="box"></div>
           </div>
         </div>
-        <label class="f">Zoom <small id="zoomV">100%</small></label>
-        <input type="range" id="zoom" min="100" max="500" step="25" value="100">
+        <div id="zoomWrap">
+          <label class="f">Zoom <small id="zoomV">100%</small></label>
+          <input type="range" id="zoom" min="100" max="500" step="25" value="100">
+        </div>
+        <div id="shirtPanel" class="hidden">
+          <div class="shirtBox"><canvas id="shirt"></canvas></div>
+          <label class="f">Shirt size</label>
+          <div id="shirtSizes"></div>
+          <label class="f">Placement</label>
+          <div class="chips" id="place">
+            <button data-p="auto" class="on">Auto</button>
+            <button data-p="center">Center chest</button>
+            <button data-p="left">Left chest</button>
+          </div>
+          <div class="stat" id="shirtNote"></div>
+        </div>
       </div>
     </div>
 
@@ -453,6 +477,7 @@ function updateStat() {
   $('#stat').innerHTML = `Output: <b>${pw} × ${ph} px</b> at 300 DPI<br>Print size: <b>${inW}" × ${(ph / 300).toFixed(2)}"</b><br>` +
     `Source: ${S.W} × ${S.H} px (${scale >= 1 ? 'upscaled ' + scale.toFixed(1) + '×' : 'downscaled'})` +
     (scale > 4 ? '<br><span style="color:#b45309">Big jump in size — for the sharpest print, start from a larger image.</span>' : '');
+  drawShirt();
 }
 
 /* ---------------- interaction ---------------- */
@@ -477,8 +502,154 @@ function setColor(c) {
 }
 $$('#bgChips button').forEach(b => b.onclick = () => {
   $$('#bgChips button').forEach(x => x.classList.toggle('on', x === b));
-  $('#stage').className = 'stage ' + b.dataset.bg;
+  $('#stage').className = 'stage ' + b.dataset.bg + (SH.mode === 'shirt' ? ' hidden' : '');
+  drawShirt();
 });
+
+/* ---------------- see on shirt ---------------- */
+// Flat garment measurements in inches: chest = armpit to armpit, len = shoulder to hem.
+// rec = typical full-front print width for that size.
+const SHIRTS = [
+  { g: 'Toddler', s: '2T',  chest: 12,   len: 15,   rec: 6 },
+  { g: 'Toddler', s: '3T',  chest: 12.5, len: 16,   rec: 6.5 },
+  { g: 'Toddler', s: '4T',  chest: 13,   len: 17,   rec: 7 },
+  { g: 'Toddler', s: '5T',  chest: 14,   len: 18,   rec: 7.5 },
+  { g: 'Youth',   s: 'XS',  chest: 15,   len: 20,   rec: 8 },
+  { g: 'Youth',   s: 'S',   chest: 16,   len: 21.5, rec: 8.5 },
+  { g: 'Youth',   s: 'M',   chest: 17.5, len: 23,   rec: 9 },
+  { g: 'Youth',   s: 'L',   chest: 18.5, len: 24.5, rec: 9.5 },
+  { g: 'Youth',   s: 'XL',  chest: 20,   len: 26,   rec: 10 },
+  { g: 'Adult',   s: 'S',   chest: 18,   len: 28,   rec: 10 },
+  { g: 'Adult',   s: 'M',   chest: 20,   len: 29,   rec: 11 },
+  { g: 'Adult',   s: 'L',   chest: 22,   len: 30,   rec: 11 },
+  { g: 'Adult',   s: 'XL',  chest: 24,   len: 31,   rec: 12 },
+  { g: 'Adult',   s: '2XL', chest: 26,   len: 32,   rec: 12 },
+  { g: 'Adult',   s: '3XL', chest: 28,   len: 33,   rec: 12 }
+];
+const SHIRT_COLORS = { checker: '#f4f4f2', white: '#f4f4f2', black: '#1b1b1d', gray: '#8a8d91', navy: '#1d2a4a' };
+const SH = { mode: 'edit', size: 10, place: 'auto' }; // Adult M by default
+
+(() => {
+  let html = '';
+  ['Toddler', 'Youth', 'Adult'].forEach(g => {
+    html += `<div class="sgrp chips"><b>${g}</b>` + SHIRTS.map((t, i) => t.g === g ?
+      `<button data-i="${i}"${i === SH.size ? ' class="on"' : ''}>${t.s}</button>` : '').join('') + '</div>';
+  });
+  $('#shirtSizes').innerHTML = html;
+})();
+$$('#shirtSizes button').forEach(b => b.onclick = () => {
+  SH.size = +b.dataset.i;
+  $$('#shirtSizes button').forEach(x => x.classList.toggle('on', x === b));
+  drawShirt();
+});
+$$('#place button').forEach(b => b.onclick = () => {
+  SH.place = b.dataset.p;
+  $$('#place button').forEach(x => x.classList.toggle('on', x === b));
+  drawShirt();
+});
+$$('#viewMode button').forEach(b => b.onclick = () => {
+  SH.mode = b.dataset.m;
+  $$('#viewMode button').forEach(x => x.classList.toggle('on', x === b));
+  const shirt = SH.mode === 'shirt';
+  $('#stage').classList.toggle('hidden', shirt);
+  $('#zoomWrap').classList.toggle('hidden', shirt);
+  $('#shirtPanel').classList.toggle('hidden', !shirt);
+  drawShirt();
+});
+$('#shirtNote').addEventListener('click', e => {
+  const w = e.target.dataset && e.target.dataset.setw;
+  if (w) { $('#printW').value = w; $('#printW').oninput(); }
+});
+
+// T-shirt outline in inches; x = 0 is the center line, y = 0 is the top of the shoulders.
+function shirtPath(C, L) {
+  const k = C / 20, h = C / 2;
+  const P = (x, y) => [x * k, y * k];
+  const neckW = 3.6, neckD = 3.0, sh = 9.4, drop = 0.9;
+  const sleeveOut = [15.6, 7.2], sleeveIn = [12.9, 9.6], pit = [h / k, 9.8];
+  const p = new Path2D();
+  const m = (pt, f) => f ? p.moveTo(...pt) : p.lineTo(...pt);
+  m(P(-neckW, 0), true);
+  m(P(-sh, drop)); m(P(-sleeveOut[0], sleeveOut[1])); m(P(-sleeveIn[0], sleeveIn[1])); m(P(-pit[0], pit[1]));
+  p.lineTo(-h, L); p.quadraticCurveTo(0, L + 0.35, h, L);
+  m(P(pit[0], pit[1])); m(P(sleeveIn[0], sleeveIn[1])); m(P(sleeveOut[0], sleeveOut[1])); m(P(sh, drop)); m(P(neckW, 0));
+  p.bezierCurveTo(neckW * 0.6 * k, neckD * 1.05 * k, -neckW * 0.6 * k, neckD * 1.05 * k, -neckW * k, 0);
+  p.closePath();
+  return { p, neckW: neckW * k, neckD: neckD * k * 0.8, sh: sh * k, drop: drop * k, sleeveOut: P(...sleeveOut), sleeveIn: P(...sleeveIn), pit: P(...pit) };
+}
+
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16), f = v => Math.max(0, Math.min(255, Math.round(v + amt * 255)));
+  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
+
+function drawShirt() {
+  if (SH.mode !== 'shirt' || !S.W) return;
+  const t = SHIRTS[SH.size], C = t.chest, L = t.len;
+  const bg = ($('#bgChips button.on') || {}).dataset?.bg || 'checker';
+  const col = SHIRT_COLORS[bg] || SHIRT_COLORS.white;
+  const cv = $('#shirt'), W = 900, Hh = 1000;
+  cv.width = W; cv.height = Hh;
+  const x = cv.getContext('2d');
+  x.clearRect(0, 0, W, Hh);
+  // Fit the shirt (sleeve span × length) into the canvas.
+  const g = shirtPath(C, L);
+  const spanW = g.sleeveOut[0] * 2, spanH = L + 0.5;
+  const ppi = Math.min((W * 0.9) / spanW, (Hh * 0.9) / spanH);
+  x.save();
+  x.translate(W / 2, (Hh - spanH * ppi) / 2);
+  x.scale(ppi, ppi);
+  // shirt body
+  x.shadowColor = 'rgba(15,25,50,.25)'; x.shadowBlur = 18; x.shadowOffsetY = 6;
+  x.fillStyle = col; x.fill(g.p);
+  x.shadowColor = 'transparent';
+  // soft fabric shading
+  const gr = x.createLinearGradient(-C / 2, 0, C / 2, 0);
+  gr.addColorStop(0, 'rgba(0,0,0,.10)'); gr.addColorStop(0.18, 'rgba(0,0,0,0)');
+  gr.addColorStop(0.82, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.10)');
+  x.fillStyle = gr; x.fill(g.p);
+  // seams + collar
+  const line = bg === 'black' || bg === 'navy' ? shade(col, 0.10) : shade(col, -0.16);
+  x.strokeStyle = line; x.lineWidth = 0.09; x.stroke(g.p);
+  x.beginPath(); // sleeve seams
+  x.moveTo(-g.sh, g.drop); x.lineTo(-g.pit[0], g.pit[1]);
+  x.moveTo(g.sh, g.drop); x.lineTo(g.pit[0], g.pit[1]);
+  x.lineWidth = 0.06; x.stroke();
+  x.beginPath(); // collar band
+  x.moveTo(-g.neckW, 0);
+  x.bezierCurveTo(-g.neckW * 0.6, g.neckD * 1.3 + 0.75, g.neckW * 0.6, g.neckD * 1.3 + 0.75, g.neckW, 0);
+  x.lineWidth = 0.55; x.strokeStyle = shade(col, bg === 'black' ? 0.05 : -0.06); x.stroke();
+  // inside back of the collar
+  x.beginPath(); x.moveTo(-g.neckW, 0); x.quadraticCurveTo(0, 0.9, g.neckW, 0);
+  x.fillStyle = shade(col, -0.12); x.fill();
+
+  // print placement (real inches)
+  const inW = Math.max(1, +$('#printW').value || 10), inH = inW * S.H / S.W;
+  const collar = g.neckD + 0.9; // bottom of front collar
+  const place = SH.place === 'auto' ? (inW <= 4.5 ? 'left' : 'center') : SH.place;
+  let dx, dy;
+  if (place === 'left') { // wearer's left chest = viewer's right
+    dx = C * 0.24 - inW / 2; dy = collar + C * 0.12;
+  } else {
+    dx = -inW / 2; dy = collar + Math.min(3, Math.max(1.5, C * 0.14));
+  }
+  x.save(); x.clip(g.p);
+  x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  x.drawImage($('#view'), dx, dy, inW, inH);
+  x.restore();
+  x.restore();
+
+  // notes
+  const maxW = Math.round((C - 4) * 2) / 2, maxH = L - dy - 3;
+  let note = `<b>${t.g} ${t.s}</b> — about ${C}" across the chest, ${L}" long.<br>` +
+    `Print: <b>${inW}" × ${inH.toFixed(1)}"</b>, ${place === 'left' ? 'left chest' : 'center chest'}.`;
+  if (place === 'center' && inW > maxW) note += `<br><span class="warn">Too wide for this size — it will wrap toward the sides. Keep it under ${maxW}".</span>`;
+  else if (place === 'center' && inH > maxH) note += `<br><span class="warn">Very tall for this size — it runs close to the bottom hem.</span>`;
+  else if (place === 'left' && inW > 5) note += `<br><span class="warn">Big for a left-chest print — 3–4" is typical.</span>`;
+  if (place === 'center' && Math.abs(inW - t.rec) >= 0.5)
+    note += `<br>Typical front print for ${t.g} ${t.s}: about ${t.rec}" wide. <button class="linkbtn" data-setw="${t.rec}">Use ${t.rec}"</button>`;
+  $('#shirtNote').innerHTML = note;
+}
 $('#zoom').oninput = e => { $('#inner').style.width = e.target.value + '%'; $('#zoomV').textContent = e.target.value + '%'; };
 $('#tol').oninput = e => $('#tolV').textContent = e.target.value;
 
