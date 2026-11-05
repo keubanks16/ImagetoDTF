@@ -1561,17 +1561,24 @@ function setGsStyle(n, note) {
   });
   gsRender();
 }
+function gsShapes(total) {
+  // the crossbar's right end is the one edge that sticks out past the S: keep its OUTER line in the
+  // same spot at every border width (thicker border = the white part of the bar ends a bit sooner)
+  const shift = total - 28;
+  return GS_SHAPES.map((pts, i) => i !== 1 ? pts : pts.map(([x, y], j) => (j === 1 || j === 2) ? [x - shift, y] : [x, y]));
+}
 function gsOps() { // drawing steps: [shape, colour or null (= cut out), stroke width]
   const wo = +$('#gsWo').value, wi = +$('#gsWi').value, ops = [];
+  const SH = gsShapes(gsStyle === 2 ? +$('#gsWb').value : wo + wi);
   if (gsStyle === 2) { // two-colour: one border around the letters
     const wb = +$('#gsWb').value;
-    for (const pts of GS_SHAPES) {
+    for (const pts of SH) {
       ops.push([pts, gsState.inner.c, 2 * wb]);
       ops.push([pts, gsState.face.clear ? null : gsState.face.c, 0]);
     }
     return ops;
   }
-  for (const pts of GS_SHAPES) {
+  for (const pts of SH) {
     ops.push([pts, gsState.outer.clear ? null : gsState.outer.c, 2 * (wo + wi)]);
     ops.push([pts, gsState.inner.clear ? null : gsState.inner.c, 2 * wi]);
     ops.push([pts, gsState.face.clear ? null : gsState.face.c, 0]);
@@ -1658,6 +1665,7 @@ $$('#appTabs button').forEach(btn => btn.onclick = () => {
   if (btn.dataset.tab === 'gs') gsRender();
 });
 gsBuildUI(); setGsStyle(3);
+window.__gs = { gsDraw }; // for testing
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
 
