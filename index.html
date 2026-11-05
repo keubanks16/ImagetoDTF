@@ -470,6 +470,7 @@ function recolor(d, W, H, region, target, shade) {
       d[i + c] = clamp((target[c] + sh) * a + other * (1 - a));
     }
   }
+  return lvl;
 }
 
 /* The main colours in the design (for one-tap colour swapping). */
@@ -617,6 +618,17 @@ function outerRegion(d, W, H, tol = 50) {
     done[f.id] = 1;
     for (let p = 0; p < N; p++) if (dF[p] <= bl) claimed[p] = 1; // this letter's stroke + outline belong to it
   }
+  // Sharp corners of the outline reach a little farther than its width; tiny leftover pockets of the
+  // outline colour (not big enough to be a letter fill) belong to the outline.
+  { const seen = new Uint8Array(N), maxA = Math.max(60, mode * mode * 3);
+    for (let p0 = 0; p0 < N; p0++) {
+      if (seen[p0] || mask[p0] || d[p0 * 4 + 3] < 16 || !ok(p0)) continue;
+      const list = []; let sp4 = 0, big2 = false; seen[p0] = 1; st[sp4++] = p0;
+      while (sp4) { const p = st[--sp4], x = p % W; if (!big2) list.push(p); if (list.length > maxA) big2 = true;
+        const nb = [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W];
+        for (const q of nb) if (q >= 0 && q < N && !seen[q] && !mask[q] && d[q * 4 + 3] >= 16 && ok(q)) { seen[q] = 1; st[sp4++] = q; } }
+      if (!big2) for (const p of list) { mask[p] = 1; n++; }
+    } }
   return n ? { mask, seed, tol, n } : null;
 }
 // The outline is worked out once from the original design, so it stays put after colour edits.
@@ -634,17 +646,45 @@ function colorRegion(d, W, H, from, tol) {
   return n ? { mask, seed: from, tol } : null;
 }
 
+/* After a swap, clean up tiny stray specks (a few pixels left over in sharp corners or where shapes
+   meet) by giving them the colour that surrounds them. Only looks inside the area that just changed. */
+function despeckle(d, W, H, area, maxA = 80) {
+  const N = W * H, seen = new Uint8Array(N), st = new Int32Array(maxA + 8);
+  const near = (i, j) => Math.abs(d[i] - d[j]) + Math.abs(d[i + 1] - d[j + 1]) + Math.abs(d[i + 2] - d[j + 2]) <= 60;
+  for (let p0 = 0; p0 < N; p0++) {
+    if (!area[p0] || seen[p0] || d[p0 * 4 + 3] < 128) continue;
+    const list = [p0]; seen[p0] = 1; let k = 0, big = false;
+    while (k < list.length && !big) { const p = list[k++], x = p % W;
+      for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W])
+        if (q >= 0 && q < N && !seen[q] && d[q * 4 + 3] >= 128 && near(q * 4, p0 * 4)) { seen[q] = 1; list.push(q); if (list.length > maxA) { big = true; break; } } }
+    if (big) continue;
+    // surrounding colours
+    const inC = new Set(list), votes = new Map(); let clear = false;
+    for (const p of list) { const x = p % W;
+      for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) {
+        if (q < 0 || q >= N || inC.has(q)) continue;
+        if (d[q * 4 + 3] < 128) { clear = true; continue; }
+        const key = (d[q * 4] >> 4) << 8 | (d[q * 4 + 1] >> 4) << 4 | (d[q * 4 + 2] >> 4);
+        const v = votes.get(key) || { n: 0, q }; v.n++; votes.set(key, v); } }
+    if (clear || !votes.size) continue;
+    let best = null; for (const v of votes.values()) if (!best || v.n > best.n) best = v;
+    const bi = best.q * 4;
+    if (Math.abs(d[bi] - d[p0 * 4]) + Math.abs(d[bi + 1] - d[p0 * 4 + 1]) + Math.abs(d[bi + 2] - d[p0 * 4 + 2]) < 90) continue;
+    for (const p of list) { const i = p * 4; d[i] = d[bi]; d[i + 1] = d[bi + 1]; d[i + 2] = d[bi + 2]; }
+  }
+}
+
 function applyOp(img, op) {
   const d = img.data, W = img.width, H = img.height;
   if (op.type === 'outer') {
     const r = getOuter(img);
-    if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
+    if (r) despeckle(d, W, H, recolor(d, W, H, r, hex2rgb(op.color), op.shade));
     return !!r;
   }
   if (op.type === 'swap') {
     const r = colorRegion(d, W, H, op.from, op.tol);
     if (r && op.keepOuter) { const o = getOuter(img); if (o) for (let p = 0; p < W * H; p++) if (o.mask[p]) r.mask[p] = 0; }
-    if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
+    if (r) despeckle(d, W, H, recolor(d, W, H, r, hex2rgb(op.color), op.shade));
     return !!r;
   }
   if (op.type === 'box') {
