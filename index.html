@@ -457,7 +457,8 @@ function recolor(d, W, H, region, target, shade) {
       if (dd < bd && !lvl[q] && src[q * 4 + 3] >= 200 && far(q * 4)) { bd = dd; n = q * 4; }
     }
     let a = 1;
-    if (n >= 0) {
+    if (mask[p] === 2) n = -1; // forced: always fully the new colour
+    else if (n >= 0) {
       let num = 0, den = 0;
       for (let c = 0; c < 3; c++) { const v = seed[c] - src[n + c]; num += (src[i + c] - src[n + c]) * v; den += v * v; }
       a = den > 200 ? Math.max(0, Math.min(1, num / den)) : (lvl[p] === 1 ? 1 : 0);
@@ -594,7 +595,8 @@ function outerRegion(d, W, H, tol = 50) {
     if (!closed) continue; // its stroke doesn't fully wrap the fill: not a top letter
     const bl = (sw + mode + 0.5) * 3;
     for (let p = 0; p < N; p++)
-      if (!mask[p] && reach[p] && dF[p] <= bl && d[p * 4 + 3] >= 16 && ok(p) && !(lab[p] >= 0 && done[lab[p]])) { mask[p] = 1; n++; }
+      // the top letter's outline covers whatever is underneath it (fill or the lower letter's stroke ends)
+      if (!mask[p] && reach[p] && dF[p] <= bl && d[p * 4 + 3] >= 16 && !(lab[p] >= 0 && done[lab[p]])) { mask[p] = ok(p) ? 1 : 2; n++; }
     done[f.id] = 1;
   }
   return n ? { mask, seed, tol, n } : null;
