@@ -1534,7 +1534,8 @@ function gsBuildUI() {
 function gsOps() { // drawing steps: [shape, colour or null (= cut out), stroke width]
   const wo = +$('#gsWo').value, wi = +$('#gsWi').value, ops = [];
   for (const pts of GS_SHAPES) {
-    ops.push([pts, gsState.outer.clear ? null : gsState.outer.c, 2 * (wo + wi)]);
+    // a transparent outer border simply means "no outer border" (it shouldn't cut a gap into the G)
+    if (!gsState.outer.clear) ops.push([pts, gsState.outer.c, 2 * (wo + wi)]);
     ops.push([pts, gsState.inner.clear ? null : gsState.inner.c, 2 * wi]);
     ops.push([pts, gsState.face.clear ? null : gsState.face.c, 0]);
   }
