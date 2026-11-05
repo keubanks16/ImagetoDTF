@@ -2111,6 +2111,7 @@ function hatImage(id, view) {
 }
 // draw the (already lit) puff logo onto a photo: front = gentle bend around the crown; angle = fitted into a quad
 function drawLogoFront(x, img, cx, cy, dw, dh, curveAmt) {
+  if (!curveAmt) { x.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh); return; } // flat, as puff sits on a structured front panel
   const hw = dw / 2, N = Math.max(24, Math.round(dw / 3));
   for (let i = 0; i < N; i++) {
     const sx = i * img.width / N, sw = img.width / N;
@@ -2188,7 +2189,7 @@ function embHatRender() {
     const img = puffImage(src), pxIn = W / HAT_WIDTH_IN, dw = wIn * pxIn, dh = dw * img.height / img.width;
     if (view === 'front') {
       const cx = hat.front.cx * W, cy = hat.front.cy * H;
-      drawLogoFront(x, img, cx, cy, dw, dh, 1);
+      drawLogoFront(x, img, cx, cy, dw, dh, 0);
     } else {
       // the quad is the front-panel area (~4.6" wide); place the logo centred in it at the right relative size
       const q = hat.angle.q.map(([u, v]) => [u * W, v * H]), fw = wIn / 4.6, fh = fw * (img.height / img.width) * (4.6 / 4.0);
