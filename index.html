@@ -106,7 +106,7 @@
   .hats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
   .hatchip{border:1px solid var(--line);background:#fff;border-radius:10px;padding:4px 2px 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
   .hatchip.on{border-color:var(--accent2);box-shadow:0 0 0 2px var(--accent2)}
-  .hatchip .hatimg{width:100%;max-width:84px;height:auto}
+  .hatchip .hatimg{width:100%;max-width:84px;height:auto;border-radius:6px}
   .hatchip span{font-size:10.5px;font-weight:600;color:var(--ink);text-align:center;line-height:1.15}
 </style>
 </head>
@@ -330,6 +330,7 @@
         </div>
         <div class="stage white" id="embStage"><canvas id="embCanvas" width="1000" height="800"></canvas></div>
         <div id="embHatBox" class="hidden">
+          <div class="seg" id="embHatAngle" style="margin:4px 0 10px"><button data-hv="front" class="on">Front</button><button data-hv="angle">Angle</button></div>
           <label class="f">Hat color <small>The Game GB998 Perforated GameChanger</small></label>
           <div class="hats" id="embHats"></div>
           <p class="hint" id="embHatNote"></p>
@@ -380,7 +381,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 1:45 AM — Embroidery page (DST · PES · JEF) + 3D puff hat preview</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 2:20 AM — real GB998 hat photos in the puff preview</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -2087,74 +2088,50 @@ $$('#embSizes button').forEach(btn => btn.onclick = () => { $('#embW').value = b
    A drawn flat-bill cap (front view) in the 8 GS colourways, with the logo rendered as raised puff
    embroidery: every colour area is domed (height from distance to its edge), lit from the top-left,
    given thread texture and a soft shadow, then bent slightly around the crown. */
+/* The Game GB998 Perforated GameChanger — real product photos (hats/*.webp), in the GS colourways.
+   front: where the logo sits on the straight-on photo (centre as a fraction of the image; cap is ~7.6" wide).
+   angle: the four corners (TL, TR, BR, BL) of the front-panel area on the 3/4 photo, as image fractions. */
+const HAT_WIDTH_IN = 7.6;
 const HATS = [
-  { name: 'Black · Columbia visor', front: '#1d1d20', side: '#1d1d20', visor: '#86B3DD' },
-  { name: 'Columbia · Navy visor', front: '#86B3DD', side: '#86B3DD', visor: '#1b2342' },
-  { name: 'Columbia', front: '#86B3DD', side: '#86B3DD', visor: '#86B3DD' },
-  { name: 'Navy', front: '#1b2342', side: '#1b2342', visor: '#1b2342' },
-  { name: 'Navy · Columbia visor', front: '#1b2342', side: '#1b2342', visor: '#86B3DD' },
-  { name: 'White · Navy', front: '#f3f3f1', side: '#1b2342', visor: '#1b2342' },
-  { name: 'White · Columbia visor', front: '#f3f3f1', side: '#f3f3f1', visor: '#86B3DD' },
-  { name: 'White · Navy · Columbia visor', front: '#f3f3f1', side: '#1b2342', visor: '#86B3DD' }
+  { id: 'navy-columbia', name: 'Navy · Columbia visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
+  { id: 'columbia-navy', name: 'Columbia · Navy visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.285, 0.335], [0.62, 0.29], [0.645, 0.695], [0.275, 0.745]] } },
+  { id: 'columbia', name: 'Columbia', front: { cx: 0.5, cy: 0.545 }, angle: null },
+  { id: 'navy', name: 'Navy', front: { cx: 0.5, cy: 0.545 }, angle: null },
+  { id: 'navy-white', name: 'Navy · White front', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.305, 0.325], [0.64, 0.28], [0.665, 0.685], [0.295, 0.735]] } },
+  { id: 'white-navy', name: 'White · Navy visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
+  { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
+  { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } }
 ];
-EMB.view = 'stitch'; EMB.hat = 1;
-function shadeHex(hex, f) { const c = hex2rgb(hex.toLowerCase()); return `rgb(${c.map(v => Math.max(0, Math.min(255, Math.round(f >= 0 ? v + (255 - v) * f : v * (1 + f))))).join(',')})`; }
-function hatPaths() { // 1000×820 canvas
-  const crown = new Path2D(); crown.moveTo(140, 612); crown.bezierCurveTo(132, 380, 270, 214, 500, 208); crown.bezierCurveTo(730, 214, 868, 380, 860, 612); crown.quadraticCurveTo(500, 646, 140, 612); crown.closePath();
-  const front = new Path2D(); front.moveTo(272, 626); front.bezierCurveTo(268, 430, 352, 248, 500, 210); front.bezierCurveTo(648, 248, 732, 430, 728, 626); front.quadraticCurveTo(500, 646, 272, 626); front.closePath();
-  const visor = new Path2D(); visor.moveTo(112, 604); visor.quadraticCurveTo(500, 636, 888, 604); visor.lineTo(910, 656); visor.quadraticCurveTo(500, 724, 90, 656); visor.closePath();
-  return { crown, front, visor };
+EMB.view = 'stitch'; EMB.hat = 0; EMB.hatView = 'front';
+const hatImgs = {};
+function hatImage(id, view) {
+  const key = id + '-' + view; if (hatImgs[key]) return hatImgs[key];
+  const img = new Image(); img.src = 'hats/' + key + '.webp'; hatImgs[key] = img;
+  img.onload = () => { if (EMB.view === 'hat') { embHatRender(); } };
+  return img;
 }
-function drawHat(x, hat, logo, opts = {}) {
-  const P = hatPaths();
-  x.save();
-  // shadow under the cap
-  x.fillStyle = 'rgba(0,0,0,.18)'; x.beginPath(); x.ellipse(500, 700, 430, 36, 0, 0, Math.PI * 2); x.filter = 'blur(14px)'; x.fill(); x.filter = 'none';
-  // crown: sides then front panels
-  x.fillStyle = hat.side; x.fill(P.crown);
-  x.save(); x.clip(P.crown); x.fillStyle = hat.front; x.fill(P.front);
-  // perforated side panels
-  x.save(); const sideOnly = new Path2D(); sideOnly.addPath(P.crown); x.clip(P.crown);
-  x.fillStyle = shadeHex(hat.side, hat.side === '#f3f3f1' ? -0.12 : 0.18);
-  for (let yy = 230; yy < 640; yy += 9) for (let xx = 140 + ((yy / 9) % 2) * 4.5; xx < 860; xx += 9) {
-    if (x.isPointInPath(P.front, xx, yy)) continue; x.beginPath(); x.arc(xx, yy, 1.4, 0, Math.PI * 2); x.fill(); }
-  x.restore();
-  // seams
-  x.strokeStyle = shadeHex(hat.front, -0.25); x.lineWidth = 2.2; x.setLineDash([]);
-  x.beginPath(); x.moveTo(500, 212); x.lineTo(500, 630); x.stroke();
-  x.strokeStyle = shadeHex(hat.side, -0.3); x.stroke(P.front);
-  x.setLineDash([5, 4]); x.lineWidth = 1.2; x.strokeStyle = shadeHex(hat.front, hat.front === '#f3f3f1' ? -0.3 : 0.25);
-  x.beginPath(); x.moveTo(492, 222); x.lineTo(492, 628); x.moveTo(508, 222); x.lineTo(508, 628); x.stroke(); x.setLineDash([]);
-  // the logo, bent around the crown
-  if (logo) {
-    const { img, wIn } = logo, pxIn = 92, dw = wIn * pxIn, dh = dw * img.height / img.width, cx = 500, cy = 425 - Math.max(0, dh - 230) * 0.2, hw = 300;
-    // soft shadow
-    x.save(); x.globalAlpha = 0.45; x.filter = 'blur(5px) brightness(0)';
-    for (let i = 0; i < img.width; i += 2) { const fx = (i / img.width - 0.5) * dw, t = fx / hw, nx = cx + fx * (1 - 0.06 * t * t), ny = cy - dh / 2 + 18 * t * t;
-      x.drawImage(img, i, 0, 2, img.height, nx + 3, ny + 6, 2 * dw / img.width + 0.6, dh); }
-    x.restore();
-    for (let i = 0; i < img.width; i += 2) { const fx = (i / img.width - 0.5) * dw, t = fx / hw, nx = cx + fx * (1 - 0.06 * t * t), ny = cy - dh / 2 + 18 * t * t;
-      x.drawImage(img, i, 0, 2, img.height, nx, ny, 2 * dw / img.width + 0.6, dh); }
+// draw the (already lit) puff logo onto a photo: front = gentle bend around the crown; angle = fitted into a quad
+function drawLogoFront(x, img, cx, cy, dw, dh, curveAmt) {
+  const hw = dw / 2, N = Math.max(24, Math.round(dw / 3));
+  for (let i = 0; i < N; i++) {
+    const sx = i * img.width / N, sw = img.width / N;
+    const t0 = (i / N - 0.5) * 2, t1 = ((i + 1) / N - 0.5) * 2;
+    const X0 = cx + t0 * hw * (1 - curveAmt * 0.12 * t0 * t0), X1 = cx + t1 * hw * (1 - curveAmt * 0.12 * t1 * t1);
+    const Y0 = cy - dh / 2 + curveAmt * dh * 0.07 * t0 * t0;
+    x.drawImage(img, sx, 0, sw, img.height, X0, Y0, X1 - X0 + 0.7, dh);
   }
-  // roundness of the crown
-  const g = x.createRadialGradient(430, 330, 40, 500, 470, 470);
-  g.addColorStop(0, 'rgba(255,255,255,.14)'); g.addColorStop(0.6, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(0,0,0,.34)');
-  x.fillStyle = g; x.fill(P.crown);
-  x.restore(); // crown clip
-  // eyelets + button
-  for (const [ex, ey] of [[338, 330], [662, 330]]) { x.fillStyle = shadeHex(hat.side, -0.45); x.beginPath(); x.arc(ex, ey, 6, 0, Math.PI * 2); x.fill(); x.strokeStyle = shadeHex(hat.side, 0.25); x.lineWidth = 1.5; x.stroke(); }
-  x.fillStyle = shadeHex(hat.side, 0.05); x.beginPath(); x.ellipse(500, 208, 22, 9, 0, 0, Math.PI * 2); x.fill(); x.strokeStyle = shadeHex(hat.side, -0.35); x.lineWidth = 1.5; x.stroke();
-  // visor (flat bill) with stitch rows
-  x.fillStyle = hat.visor; x.fill(P.visor);
-  x.save(); x.clip(P.visor);
-  const vg = x.createLinearGradient(0, 600, 0, 700); vg.addColorStop(0, 'rgba(255,255,255,.12)'); vg.addColorStop(1, 'rgba(0,0,0,.28)'); x.fillStyle = vg; x.fill(P.visor);
-  x.strokeStyle = shadeHex(hat.visor, hat.visor === '#1b2342' ? 0.3 : -0.25); x.lineWidth = 1.1; x.setLineDash([5, 4]);
-  for (let k = 0; k < 6; k++) { x.beginPath(); x.moveTo(112 - k * 3, 614 + k * 7); x.quadraticCurveTo(500, 650 + k * 10, 888 + k * 3, 614 + k * 7); x.stroke(); }
-  x.setLineDash([]); x.restore();
-  x.strokeStyle = 'rgba(0,0,0,.25)'; x.lineWidth = 1.5; x.stroke(P.visor); x.stroke(P.crown);
-  x.restore();
 }
-/* puff render of the design: domed colour areas with light, thread texture and edge grooves */
+function drawLogoQuad(x, img, q, N = 40) { // q = [[x,y]...] TL TR BR BL in pixels; vertical strips with perspective-ish interpolation
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  for (let i = 0; i < N; i++) {
+    const t0 = i / N, t1 = (i + 1) / N;
+    const top0 = lerp(q[0], q[1], t0), top1 = lerp(q[0], q[1], t1), bot0 = lerp(q[3], q[2], t0), bot1 = lerp(q[3], q[2], t1);
+    const sx = t0 * img.width, sw = (t1 - t0) * img.width;
+    // affine map of the source strip rectangle onto the quad strip
+    const a = (top1[0] - top0[0]) / sw, bb = (top1[1] - top0[1]) / sw, c = (bot0[0] - top0[0]) / img.height, d = (bot0[1] - top0[1]) / img.height;
+    x.save(); x.setTransform(a, bb, c, d, top0[0], top0[1]); x.drawImage(img, sx, 0, sw + 1.2, img.height, 0, 0, sw + 1.2, img.height); x.restore();
+  }
+}
 function puffImage(src) {
   const sc = Math.max(1, Math.round(src.W / 520)), W = Math.ceil(src.W / sc), H = Math.ceil(src.H / sc), N = W * H, lab = new Uint8Array(N);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) lab[y * W + x] = src.lab[Math.min(src.H - 1, y * sc) * src.W + Math.min(src.W - 1, x * sc)];
@@ -2181,25 +2158,44 @@ function puffImage(src) {
   return c;
 }
 function embHatRender() {
-  const cv = $('#embCanvas'); cv.width = 1000; cv.height = 820;
-  const x = cv.getContext('2d'); x.clearRect(0, 0, 1000, 820);
-  const src = EMB.lastSrc; let logo = null;
-  if (src) logo = { img: puffImage(src), wIn: +$('#embW').value || 3.5 };
-  drawHat(x, HATS[EMB.hat], logo);
-  const w = +$('#embW').value || 3.5;
-  $('#embHatNote').innerHTML = (w > 4.5 ? '<b style="color:#c0262d">Most caps take up to about 4.5" wide on the front — try the Hat size.</b><br>' : '') +
-    'Preview of 3D puff on The Game GB998 Perforated GameChanger. Real puff is sewn with satin columns over foam; these exported files use flat fill, so ask your embroiderer to digitize for puff (or use the files as-is for flat embroidery).';
+  const hat = HATS[EMB.hat], view = hat.angle && EMB.hatView === 'angle' ? 'angle' : 'front', photo = hatImage(hat.id, view);
+  const cv = $('#embCanvas');
+  if (!photo.complete || !photo.naturalWidth) { cv.width = 1000; cv.height = 760; return; }
+  const W = 1000, H = Math.round(photo.naturalHeight * W / photo.naturalWidth); cv.width = W; cv.height = H;
+  const x = cv.getContext('2d'); x.clearRect(0, 0, W, H); x.imageSmoothingQuality = 'high'; x.drawImage(photo, 0, 0, W, H);
+  const src = EMB.lastSrc, wIn = +$('#embW').value || 3.5;
+  if (src) {
+    const img = puffImage(src), pxIn = W / HAT_WIDTH_IN, dw = wIn * pxIn, dh = dw * img.height / img.width;
+    if (view === 'front') {
+      const cx = hat.front.cx * W, cy = hat.front.cy * H;
+      x.save(); x.globalAlpha = 0.5; x.filter = 'blur(5px) brightness(0)'; drawLogoFront(x, img, cx + 3, cy + 6, dw, dh, 1); x.restore();
+      drawLogoFront(x, img, cx, cy, dw, dh, 1);
+    } else {
+      // the quad is the front-panel area (~4.6" wide); place the logo centred in it at the right relative size
+      const q = hat.angle.q.map(([u, v]) => [u * W, v * H]), fw = wIn / 4.6, fh = fw * (img.height / img.width) * (4.6 / 4.0);
+      const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const sub = (u0, v0, u1, v1) => [lerp(lerp(q[0], q[1], u0), lerp(q[3], q[2], u0), v0), lerp(lerp(q[0], q[1], u1), lerp(q[3], q[2], u1), v0), lerp(lerp(q[0], q[1], u1), lerp(q[3], q[2], u1), v1), lerp(lerp(q[0], q[1], u0), lerp(q[3], q[2], u0), v1)];
+      const lq = sub(0.5 - fw / 2, 0.5 - fh / 2, 0.5 + fw / 2, 0.5 + fh / 2);
+      x.save(); x.globalAlpha = 0.5; x.filter = 'blur(4px) brightness(0)'; drawLogoQuad(x, img, lq.map(([a, b]) => [a + 3, b + 5])); x.restore();
+      drawLogoQuad(x, img, lq);
+    }
+  }
+  if (window.__hatDebug && view === 'angle') { x.strokeStyle = '#f0f'; x.lineWidth = 2; const q = hat.angle.q.map(([u, v]) => [u * W, v * H]); x.beginPath(); q.forEach((p, i) => i ? x.lineTo(...p) : x.moveTo(...p)); x.closePath(); x.stroke(); }
+  $('#embHatNote').innerHTML = (wIn > 4.5 ? '<b style="color:#c0262d">Most caps take up to about 4.5" wide on the front — try the Hat size.</b><br>' : '') +
+    'Shown on The Game GB998 Perforated GameChanger (product photos). Real 3D puff is sewn with satin columns over foam; the exported files are flat fill, so ask your embroiderer to digitize for puff (or use the files as-is for flat embroidery).';
 }
 function embHatChips() {
   const box = $('#embHats'); box.innerHTML = '';
   HATS.forEach((h, i) => {
     const b = document.createElement('button'); b.className = 'hatchip' + (i === EMB.hat ? ' on' : ''); b.title = h.name;
-    const c = mk(140, 115), x = c.getContext('2d'); x.scale(0.14, 0.14); drawHat(x, h, null); c.className = 'hatimg';
-    b.appendChild(c); const s = document.createElement('span'); s.textContent = h.name; b.appendChild(s);
-    b.onclick = () => { EMB.hat = i; $$('#embHats .hatchip').forEach((el, j) => el.classList.toggle('on', j === i)); embHatRender(); };
+    const im = document.createElement('img'); im.src = 'hats/' + h.id + '-front.webp'; im.className = 'hatimg'; im.alt = h.name; b.appendChild(im);
+    const s = document.createElement('span'); s.textContent = h.name; b.appendChild(s);
+    b.onclick = () => { EMB.hat = i; $$('#embHats .hatchip').forEach((el, j) => el.classList.toggle('on', j === i)); $('#embHatAngle').classList.toggle('hidden', !h.angle); embHatRender(); };
     box.appendChild(b);
   });
+  $('#embHatAngle').classList.toggle('hidden', !HATS[EMB.hat].angle);
 }
+$$('#embHatAngle button').forEach(btn => btn.onclick = () => { EMB.hatView = btn.dataset.hv; $$('#embHatAngle button').forEach(x => x.classList.toggle('on', x === btn)); embHatRender(); });
 $$('#embView button').forEach(btn => btn.onclick = () => {
   EMB.view = btn.dataset.v; $$('#embView button').forEach(x => x.classList.toggle('on', x === btn));
   $('#embHatBox').classList.toggle('hidden', EMB.view !== 'hat'); $('#embBg').classList.toggle('hidden', EMB.view === 'hat');
