@@ -219,6 +219,7 @@
       </div>
 
       <button class="btn primary" id="export">Download DTF PNG</button>
+      <button class="btn dark" id="svgBtn" style="width:100%;margin-top:8px;padding:13px">Download SVG (vector)</button>
       <button class="btn dark hidden" id="share" style="width:100%;margin-top:8px;padding:13px">Share / Save to Files</button>
       <p class="hint" id="done"></p>
     </div>
@@ -262,7 +263,7 @@ function loadFile(file) {
     $('#done').textContent = ''; $('#share').classList.add('hidden');
     await tick();
     { const c0 = logoColors(S.orig); const lm = c0.length <= 8 && logoFit(S.orig, c0) > 0.97; // solid-colour logo? clean its edges by default
-      $('#logoMode').checked = lm; $('#logoOpts').classList.toggle('hidden', !lm); }
+      $('#logoMode').checked = lm; $('#logoOpts').classList.toggle('hidden', !lm); $('#svgBtn').classList.toggle('hidden', !lm); }
     rebuildBase(); busy(false);
   };
   img.onerror = () => { busy(false); alert('Could not open that image. Try a PNG or JPG.'); };
@@ -1044,7 +1045,20 @@ $('#bgTol').oninput = e => { $('#bgTolV').textContent = e.target.value; clearTim
 $('#defringe').onchange = rebuildBase;
 $('#sat').oninput = e => { $('#satV').textContent = e.target.value + '%'; render(); };
 $('#sharp').oninput = e => $('#sharpV').textContent = e.target.value;
-$('#logoMode').onchange = () => { $('#logoOpts').classList.toggle('hidden', !$('#logoMode').checked); render(); };
+$('#logoMode').onchange = () => { const on = $('#logoMode').checked; $('#logoOpts').classList.toggle('hidden', !on); $('#svgBtn').classList.toggle('hidden', !on); render(); };
+$('#svgBtn').onclick = async () => {
+  try {
+    busy(true, 'Tracing vector outlines…'); await tick();
+    const srcID = saturate(copyID(S.work), +$('#sat').value / 100);
+    const v = await vectorLogo(srcID, S.W, S.H, logoColors(srcID), +$('#smooth').value);
+    const inW = Math.max(1, Math.min(24, +$('#printW').value || 10));
+    const blob = new Blob([vectorSVG(v.vector, inW)], { type: 'image/svg+xml' });
+    const fname = `${S.name}_vector.svg`;
+    if (typeof NATIVE !== 'undefined' && NATIVE) { await nativeSave(blob, fname); }
+    else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); }
+    $('#done').innerHTML = `Saved <b>${fname}</b> — vector file, scales to any size with perfectly sharp edges.`;
+  } catch (err) { alert(err.message || err); } finally { busy(false); }
+};
 let smoothTimer; $('#smooth').oninput = e => { $('#smoothV').textContent = e.target.value; clearTimeout(smoothTimer); smoothTimer = setTimeout(render, 200); };
 $('#printW').oninput = () => { $$('#sizeChips button').forEach(x => x.classList.toggle('on', +x.dataset.w === +$('#printW').value)); updateStat(); };
 $$('#sizeChips button').forEach(b => b.onclick = () => { $('#printW').value = b.dataset.w; $('#printW').oninput(); });
@@ -1219,18 +1233,28 @@ async function vectorLogo(src, tw, th, cols, level) {
   // 3. trace + straighten + draw each stacked layer
   const out = mk(tw, th), ox = out.getContext('2d', { willReadFrequently: true }), sc = tw / W;
   const rank = new Int16Array(K).fill(-1); order.forEach((k, i) => rank[k] = i);
-  const inside = new Uint8Array(N);
+  const inside = new Uint8Array(N), layers = [];
   for (let li = 0; li < order.length; li++) {
     for (let p = 0; p < N; p++) inside[p] = lab[p] && rank[lab[p]] >= li ? 1 : 0;
     const loops = traceLoops(inside, W, H).map(l => simplifyLoop(l, eps)).filter(l => l[0].length >= 3 && polyArea(l) >= 6);
     const c = cols[order[li] - 1];
+    layers.push({ c, loops, seal: li > 0 });
     ox.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; ox.beginPath();
     for (const [xs, ys] of loops) { ox.moveTo(xs[0] * sc, ys[0] * sc); for (let i = 1; i < xs.length; i++) ox.lineTo(xs[i] * sc, ys[i] * sc); ox.closePath(); }
     ox.fill('evenodd');
     if (li > 0) { ox.strokeStyle = ox.fillStyle; ox.lineWidth = Math.max(1, sc * 0.9); ox.lineJoin = 'miter'; ox.stroke(); } // seal hairline seams
     await tick();
   }
-  return ox.getImageData(0, 0, tw, th);
+  const res = ox.getImageData(0, 0, tw, th); res.vector = { W, H, layers }; return res;
+}
+function vectorSVG({ W, H, layers }, inW) {
+  const f = v => Math.round(v * 100) / 100, hx = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+  let out = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${inW}in" height="${f(inW * H / W)}in">\n`;
+  for (const { c, loops, seal } of layers) {
+    const d = loops.map(([xs, ys]) => 'M' + xs.map((x, i) => f(x) + ' ' + f(ys[i])).join('L') + 'Z').join('');
+    out += `<path fill="${hx(c)}" fill-rule="evenodd"${seal ? ` stroke="${hx(c)}" stroke-width="0.9" stroke-linejoin="miter"` : ''} d="${d}"/>\n`;
+  }
+  return out + '</svg>\n';
 }
 
 async function buildPNG() {
