@@ -349,11 +349,12 @@
       </div>
       <div class="card">
         <h2>Size</h2>
-        <label class="f">Design width (inches)</label>
+        <label class="f">Design size (inches) <small>— width × height; change either one</small></label>
         <div class="row">
-          <input type="number" id="embW" value="3.5" min="1" max="12" step="0.25">
+          <input type="number" id="embW" value="3.5" min="1" max="12" step="0.05" style="width:80px"> <span style="color:var(--muted)">×</span>
+          <input type="number" id="embH" value="" min="0.5" max="12" step="0.05" style="width:80px">
           <div class="chips" id="embSizes">
-            <button data-w="2.5">Hat</button><button data-w="3.5" class="on">Left chest</button><button data-w="5">5"</button><button data-w="8">Full front 8"</button>
+            <button data-h="2.75">Hat (2.75" tall)</button><button data-w="3.5" class="on">Left chest</button><button data-w="5">5"</button><button data-w="8">Full front 8"</button>
           </div>
         </div>
         <label class="f">Fill density</label>
@@ -2092,6 +2093,7 @@ async function embBuild() {
     const spacing = +($('#embDensity .on').dataset.d), ang = +($('#embAngle .on').dataset.a);
     const blocks = embDigitize(src, spacing, ang);
     EMB.colors = blocks.map(b => b.color); EMB.stream = embStream(blocks); EMB.W = src.W; EMB.H = src.H; EMB.lastSrc = src;
+    if (!$('#embH').value) embSyncSizes('w');
     embPreview();
     if (EMB.view === 'hat') embHatRender();
   } finally { busy(false); }
@@ -2134,8 +2136,20 @@ $$('#embSrc button').forEach(btn => btn.onclick = () => {
 });
 for (const id of ['embDensity', 'embAngle']) $$(`#${id} button`).forEach(btn => btn.onclick = () => { $$(`#${id} button`).forEach(x => x.classList.toggle('on', x === btn)); embRefresh(); });
 $$('#embBg button').forEach(btn => btn.onclick = () => { $$('#embBg button').forEach(x => x.classList.toggle('on', x === btn)); $('#embStage').className = 'stage ' + btn.dataset.bg; });
-$('#embW').oninput = () => { $$('#embSizes button').forEach(x => x.classList.toggle('on', +x.dataset.w === +$('#embW').value)); embRefresh(); };
-$$('#embSizes button').forEach(btn => btn.onclick = () => { $('#embW').value = btn.dataset.w; $('#embW').oninput(); });
+// width and height stay linked through the design's own proportions
+function embAspect() { // height / width of the current design
+  if (EMB.src === 'gs') { const { b } = gsSize(); return (b[3] - b[1]) / (b[2] - b[0]); }
+  return S.work ? S.H / S.W : 1;
+}
+function embSyncSizes(from) {
+  const r = embAspect(), f2 = v => Math.round(v * 100) / 100;
+  if (from === 'h') $('#embW').value = f2(Math.max(1, Math.min(12, (+$('#embH').value || 1) / r)));
+  else $('#embH').value = f2((+$('#embW').value || 3.5) * r);
+  $$('#embSizes button').forEach(x => x.classList.toggle('on', x.dataset.w ? Math.abs(+x.dataset.w - +$('#embW').value) < 0.03 : Math.abs(+x.dataset.h - +$('#embH').value) < 0.03));
+}
+$('#embW').oninput = () => { embSyncSizes('w'); embRefresh(); };
+$('#embH').oninput = () => { embSyncSizes('h'); embRefresh(); };
+$$('#embSizes button').forEach(btn => btn.onclick = () => { if (btn.dataset.h) { $('#embH').value = btn.dataset.h; embSyncSizes('h'); } else { $('#embW').value = btn.dataset.w; embSyncSizes('w'); } embRefresh(); });
 /* ---------------- 3D puff preview on The Game GB998 cap ----------------
    A drawn flat-bill cap (front view) in the 8 GS colourways, with the logo rendered as raised puff
    embroidery: every colour area is domed (height from distance to its edge), lit from the top-left,
@@ -2274,7 +2288,7 @@ $$('#embView button').forEach(btn => btn.onclick = () => {
   EMB.view = btn.dataset.v; $$('#embView button').forEach(x => x.classList.toggle('on', x === btn));
   $('#embHatBox').classList.toggle('hidden', EMB.view !== 'hat'); $('#embBg').classList.toggle('hidden', EMB.view === 'hat');
   $('#embStage').className = 'stage ' + (EMB.view === 'hat' ? 'white' : ($('#embBg .on').dataset.bg));
-  if (EMB.view === 'hat') { embHatChips(); embHatRender(); } else if (EMB.stream) embPreview();
+  if (EMB.view === 'hat') { if (!EMB.hatSized) { EMB.hatSized = true; $('#embH').value = 2.75; embSyncSizes('h'); embRefresh(); } embHatChips(); embHatRender(); } else if (EMB.stream) embPreview();
 });
 
 window.__emb = { EMB, embHatRender, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
