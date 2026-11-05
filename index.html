@@ -211,6 +211,9 @@
         <input type="range" id="sharp" min="0" max="100" value="35">
         <label class="f">Color boost <small id="satV">10%</small></label>
         <input type="range" id="sat" min="0" max="50" value="10">
+        <div class="toggle"><div>Clean logo edges<small>Redraws every edge smooth and straight using the logo's exact colors. Best for solid-color logos and text — turn off for photos or shaded art.</small></div><input type="checkbox" id="logoMode"></div>
+        <div id="logoOpts"><label class="f">Edge smoothing <small id="smoothV">8</small></label>
+        <input type="range" id="smooth" min="1" max="12" value="8"></div>
         <div class="toggle"><div>Solid edges (recommended)<small>No see-through pixels — prevents fuzzy or ghosted DTF edges</small></div><input type="checkbox" id="hard" checked></div>
         <div class="stat" id="stat">—</div>
       </div>
@@ -257,7 +260,10 @@ function loadFile(file) {
     $('#view').width = w; $('#view').height = h;
     drop.classList.add('hidden'); $('#editor').classList.remove('hidden');
     $('#done').textContent = ''; $('#share').classList.add('hidden');
-    await tick(); rebuildBase(); busy(false);
+    await tick();
+    { const c0 = logoColors(S.orig); const lm = c0.length <= 8 && logoFit(S.orig, c0) > 0.97; // solid-colour logo? clean its edges by default
+      $('#logoMode').checked = lm; $('#logoOpts').classList.toggle('hidden', !lm); }
+    rebuildBase(); busy(false);
   };
   img.onerror = () => { busy(false); alert('Could not open that image. Try a PNG or JPG.'); };
   img.src = url;
@@ -474,7 +480,7 @@ function recolor(d, W, H, region, target, shade) {
 }
 
 /* The main colours in the design (for one-tap colour swapping). */
-function palette(id) {
+function palette(id, minShare = 0.008) {
   const d = id.data, bins = new Map(); let total = 0;
   for (let i = 0; i < d.length; i += 16) {
     if (d[i + 3] < 200) continue; total++;
@@ -487,7 +493,7 @@ function palette(id) {
     const g = groups.find(g => Math.max(...g.c.map((v, j) => Math.abs(v - c[j]))) < 45);
     if (g) g.n += e[0]; else if (groups.length < 40) groups.push({ c, n: e[0] });
   }
-  const big = groups.filter(g => g.n / total >= 0.008).sort((a, b) => b.n - a.n);
+  const big = groups.filter(g => g.n / total >= minShare).sort((a, b) => b.n - a.n);
   const keep = big.filter((g, gi) => { // hide in-between edge colours (a blend of two bigger colours)
     if (g.n / total > 0.05) return true;
     for (let a = 0; a < gi; a++) for (let b = a + 1; b < gi; b++) {
@@ -728,11 +734,20 @@ function saturate(id, amt) {
   }
   return id;
 }
+let renderSeq = 0;
 function render() {
   const out = saturate(copyID(S.work), +$('#sat').value / 100);
-  $('#view').getContext('2d').putImageData(out, 0, 0);
+  const v = $('#view'), vx = v.getContext('2d');
   updateStat();
   drawPalette();
+  if (!$('#logoMode').checked) { vx.putImageData(out, 0, 0); return; }
+  // preview the cleaned edges (at screen-friendly size so it stays quick)
+  const seq = ++renderSeq, k = Math.min(1, 1400 / Math.max(S.W, S.H)), pw = Math.round(S.W * k), ph = Math.round(S.H * k);
+  smoothLogo(out, pw, ph, logoColors(out), +$('#smooth').value * 0.5 * k).then(sm => {
+    if (seq !== renderSeq) return;
+    const c = mk(pw, ph); c.getContext('2d').putImageData(sm, 0, 0);
+    vx.clearRect(0, 0, S.W, S.H); vx.imageSmoothingQuality = 'high'; vx.drawImage(c, 0, 0, S.W, S.H);
+  });
 }
 function updateStat() {
   if (!S.W) return;
@@ -1030,6 +1045,8 @@ $('#bgTol').oninput = e => { $('#bgTolV').textContent = e.target.value; clearTim
 $('#defringe').onchange = rebuildBase;
 $('#sat').oninput = e => { $('#satV').textContent = e.target.value + '%'; render(); };
 $('#sharp').oninput = e => $('#sharpV').textContent = e.target.value;
+$('#logoMode').onchange = () => { $('#logoOpts').classList.toggle('hidden', !$('#logoMode').checked); render(); };
+let smoothTimer; $('#smooth').oninput = e => { $('#smoothV').textContent = e.target.value; clearTimeout(smoothTimer); smoothTimer = setTimeout(render, 200); };
 $('#printW').oninput = () => { $$('#sizeChips button').forEach(x => x.classList.toggle('on', +x.dataset.w === +$('#printW').value)); updateStat(); };
 $$('#sizeChips button').forEach(b => b.onclick = () => { $('#printW').value = b.dataset.w; $('#printW').oninput(); });
 
@@ -1067,10 +1084,76 @@ function setDpi(png, dpi) {
   return new Blob(parts, { type: 'image/png' });
 }
 
+/* ---------------- logo edge clean-up ----------------
+   Every pixel is snapped to one of the design's main colours (or transparent). Each colour is then
+   turned into a soft mask, enlarged to the output size and blurred a little, and the strongest mask
+   wins at every pixel. The result: clean, straight, evenly anti-aliased edges with no fuzz or specks. */
+function logoColors(id) {
+  const { colors } = palette(id, 0.0015);
+  return colors.map(c => c.rgb);
+}
+function logoFit(id, cols) { // share of solid pixels that are close to one of the colours
+  const d = id.data; let tot = 0, ok = 0;
+  for (let i = 0; i < d.length; i += 28) { if (d[i + 3] < 200) continue; tot++;
+    for (const c of cols) if (Math.abs(d[i] - c[0]) + Math.abs(d[i + 1] - c[1]) + Math.abs(d[i + 2] - c[2]) < 90) { ok++; break; } }
+  return tot ? ok / tot : 0;
+}
+async function smoothLogo(src, tw, th, cols, rad) {
+  const W = src.width, H = src.height, sd = src.data, N = W * H, L = cols.length + 1; // label 0 = transparent
+  const lab = new Uint8Array(N), wgt = new Uint8Array(N);
+  for (let p = 0; p < N; p++) { const i = p * 4;
+    if (sd[i + 3] < 16) { lab[p] = 0; wgt[p] = 255; continue; }
+    let b = 0, bd = 1e9;
+    for (let k = 0; k < cols.length; k++) { const c = cols[k], dd = (sd[i] - c[0]) ** 2 + (sd[i + 1] - c[1]) ** 2 + (sd[i + 2] - c[2]) ** 2; if (dd < bd) { bd = dd; b = k; } }
+    lab[p] = b + 1; wgt[p] = sd[i + 3]; }
+  const TN = tw * th, best = new Uint8Array(TN), sec = new Uint8Array(TN), bl = new Uint8Array(TN), sl = new Uint8Array(TN);
+  const mc = mk(W, H), mx = mc.getContext('2d'), m = new ImageData(W, H), md = m.data;
+  const tc = mk(tw, th), tx = tc.getContext('2d', { willReadFrequently: true });
+  tx.imageSmoothingEnabled = true; tx.imageSmoothingQuality = 'high';
+  const tmp = new Uint16Array(TN), buf = new Uint8Array(TN);
+  const r = Math.max(1, Math.round(rad));
+  const boxH = (a, out) => { for (let y = 0; y < th; y++) { const o = y * tw; let acc = 0;
+      for (let x = -r; x <= r; x++) acc += a[o + Math.min(tw - 1, Math.max(0, x))];
+      for (let x = 0; x < tw; x++) { out[o + x] = acc / (2 * r + 1);
+        acc += a[o + Math.min(tw - 1, x + r + 1)] - a[o + Math.max(0, x - r)]; } } };
+  const boxV = (a, out) => { for (let x = 0; x < tw; x++) { let acc = 0;
+      for (let y = -r; y <= r; y++) acc += a[Math.min(th - 1, Math.max(0, y)) * tw + x];
+      for (let y = 0; y < th; y++) { out[y * tw + x] = acc / (2 * r + 1);
+        acc += a[Math.min(th - 1, y + r + 1) * tw + x] - a[Math.max(0, y - r) * tw + x]; } } };
+  for (let L0 = 0; L0 < L; L0++) {
+    for (let p = 0; p < N; p++) { const v = lab[p] === L0 ? wgt[p] : (L0 === 0 ? 255 - wgt[p] : 0); md[p * 4] = md[p * 4 + 1] = md[p * 4 + 2] = 255; md[p * 4 + 3] = v; }
+    mx.putImageData(m, 0, 0);
+    tx.clearRect(0, 0, tw, th); tx.drawImage(mc, 0, 0, tw, th);
+    const td = tx.getImageData(0, 0, tw, th).data;
+    for (let q = 0; q < TN; q++) buf[q] = td[q * 4 + 3];
+    boxH(buf, tmp); boxV(tmp, buf); boxH(buf, tmp); boxV(tmp, buf); // two box passes ≈ smooth blur
+    for (let q = 0; q < TN; q++) { const v = buf[q];
+      if (v > best[q]) { sec[q] = best[q]; sl[q] = bl[q]; best[q] = v; bl[q] = L0; }
+      else if (v > sec[q]) { sec[q] = v; sl[q] = L0; } }
+    await tick();
+  }
+  const out = new ImageData(tw, th), od = out.data, slope = 255 / (2 * r + 1);
+  for (let q = 0; q < TN; q++) {
+    const t = Math.min(1, 0.5 + 0.5 * (best[q] - sec[q]) / slope), i = q * 4, b = bl[q], c2 = sl[q];
+    const cb = b ? cols[b - 1] : null, cs = c2 ? cols[c2 - 1] : null;
+    if (!cb && !cs) { od[i + 3] = 0; continue; }
+    if (!cb) { od[i] = cs[0]; od[i + 1] = cs[1]; od[i + 2] = cs[2]; od[i + 3] = Math.round((1 - t) * 255); continue; }
+    if (!cs || sec[q] === 0) { od[i] = cb[0]; od[i + 1] = cb[1]; od[i + 2] = cb[2]; od[i + 3] = c2 === 0 && sec[q] ? Math.round(t * 255) : 255; continue; }
+    od[i] = cb[0] * t + cs[0] * (1 - t); od[i + 1] = cb[1] * t + cs[1] * (1 - t); od[i + 2] = cb[2] * t + cs[2] * (1 - t); od[i + 3] = 255;
+  }
+  return out;
+}
+
 async function buildPNG() {
   const inW = Math.max(1, Math.min(24, +$('#printW').value || 10));
   const tw = Math.round(inW * 300), th = Math.round(tw * S.H / S.W);
   if (tw * th > 40e6) throw new Error('That size is too large for the browser. Try a smaller print width.');
+  const out = mk(tw, th), ox = out.getContext('2d', { willReadFrequently: true });
+  let id;
+  if ($('#logoMode').checked) {
+    const srcID = saturate(copyID(S.work), +$('#sat').value / 100);
+    id = await smoothLogo(srcID, tw, th, logoColors(srcID), +$('#smooth').value * 0.5 * Math.max(1, tw / S.W));
+  } else {
   let src = mk(S.W, S.H);
   src.getContext('2d').putImageData(saturate(copyID(S.work), +$('#sat').value / 100), 0, 0);
   let cw = S.W, ch = S.H;
@@ -1080,11 +1163,11 @@ async function buildPNG() {
     x.drawImage(src, 0, 0, cw * 2, ch * 2); src = n; cw *= 2; ch *= 2;
     await tick();
   }
-  const out = mk(tw, th), ox = out.getContext('2d', { willReadFrequently: true });
   ox.imageSmoothingEnabled = true; ox.imageSmoothingQuality = 'high';
   ox.drawImage(src, 0, 0, tw, th);
-  const id = ox.getImageData(0, 0, tw, th);
+  id = ox.getImageData(0, 0, tw, th);
   sharpen(id, (+$('#sharp').value / 100) * 1.2);
+  }
   if ($('#hard').checked) { const d = id.data; for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 128 ? 255 : 0; }
   ox.putImageData(id, 0, 0);
   const blob = await new Promise(r => out.toBlob(r, 'image/png'));
