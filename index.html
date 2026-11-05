@@ -56,6 +56,9 @@
   .pick{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:10px;padding:3px 10px 3px 3px;font-size:14px;font-weight:600;cursor:pointer;background:#fff}
   .pick input{border:0}
   .pal{display:flex;flex-wrap:wrap;gap:8px}
+  .pal button.on{box-shadow:0 0 0 2px var(--accent2)}
+  .swapbox{margin-top:10px;padding:12px;border-radius:12px;background:#e9f2f9;border:1px solid var(--line);font-size:14px}
+  .swapbox .prev{display:inline-block;width:18px;height:18px;border-radius:50%;vertical-align:-4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25);margin:0 3px}
   .pal button{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;border-radius:99px;padding:4px 11px 4px 4px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}
   .pal button i{width:26px;height:26px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.2);display:block}
   .pal button small{color:var(--muted);font-weight:500}
@@ -161,8 +164,18 @@
           <button class="sw" style="background:#1e40af" data-c="#1e40af" title="Blue"></button>
           <label class="pick"><input type="color" id="color" value="#e3141b"><span>Pick color</span></label>
         </div>
-        <label class="f">Swap a color <small>— choose the new color above, then tap the color to replace</small></label>
+        <label class="f">Swap a color <small>— tap a color in your design to change it to any color</small></label>
         <div class="pal" id="palette"></div>
+        <div class="swapbox hidden" id="swapBox">
+          <div class="row" style="justify-content:space-between"><b id="swapTitle">Change this color to:</b></div>
+          <div class="row" id="swapSw" style="margin-top:8px"></div>
+          <div class="row" style="margin-top:8px"><label class="pick" style="width:max-content"><input type="color" id="swapColor" value="#e3141b"><span>Any color…</span></label>
+          <input type="text" id="swapHex" placeholder="#559BCB" maxlength="7" autocapitalize="characters" style="width:110px;padding:9px;border:1px solid var(--line);border-radius:9px;font-size:16px"></div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn dark" id="swapApply" style="flex:1">Apply</button>
+            <button class="btn" id="swapCancel">Cancel</button>
+          </div>
+        </div>
         <label class="f">Match tolerance <small id="tolV">60</small></label>
         <input type="range" id="tol" min="5" max="140" value="60">
         <div class="toggle"><div>Change every matching spot<small>Recolor/Erase hits that color everywhere, not just the piece you tap</small></div><input type="checkbox" id="allMatch" checked></div>
@@ -780,6 +793,29 @@ $('#outlineBtn').onclick = () => {
   if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
   else toast('No white outline found around the design.');
 };
+let swapFrom = null;
+function openSwap(rgb, hex) {
+  swapFrom = rgb;
+  const box = $('#swapBox'); box.classList.remove('hidden');
+  $('#swapColor').value = S.color;
+  const upd = () => $('#swapTitle').innerHTML = `Change <span class="prev" style="background:${hex}"></span> to <span class="prev" style="background:${$('#swapColor').value}"></span>`;
+  $('#swapSw').innerHTML = '';
+  $$('#swatches .sw').forEach(sw => { const c = sw.cloneNode(); c.classList.toggle('on', c.dataset.c === $('#swapColor').value);
+    c.onclick = () => { $('#swapColor').value = c.dataset.c; $('#swapHex').value = c.dataset.c.toUpperCase(); $$('#swapSw .sw').forEach(x => x.classList.toggle('on', x === c)); upd(); };
+    $('#swapSw').appendChild(c); });
+  $('#swapColor').oninput = () => { $$('#swapSw .sw').forEach(x => x.classList.remove('on')); $('#swapHex').value = $('#swapColor').value.toUpperCase(); upd(); };
+  $('#swapHex').value = $('#swapColor').value.toUpperCase();
+  $('#swapHex').oninput = () => { let v = $('#swapHex').value.trim(); if (!v.startsWith('#')) v = '#' + v;
+    if (/^#[0-9a-f]{6}$/i.test(v)) { $('#swapColor').value = v.toLowerCase(); $$('#swapSw .sw').forEach(x => x.classList.remove('on')); upd(); } };
+  upd(); box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+$('#swapCancel').onclick = () => { $('#swapBox').classList.add('hidden'); swapFrom = null; };
+$('#swapApply').onclick = () => {
+  if (!swapFrom) return;
+  const op = { type: 'swap', from: swapFrom, tol: Math.min(+$('#tol').value, 70), color: $('#swapColor').value, shade: $('#shade').checked }, test = copyID(S.work);
+  if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
+  $('#swapBox').classList.add('hidden'); swapFrom = null;
+};
 function drawPalette() {
   const el = $('#palette'); if (!el || !S.work) return;
   const hx = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
@@ -788,10 +824,7 @@ function drawPalette() {
     const b = document.createElement('button');
     b.innerHTML = `<i style="background:${hx(p.rgb)}"></i>${hx(p.rgb).toUpperCase()} <small>${p.pct < 1 ? '<1' : Math.round(p.pct)}%</small>`;
     b.title = 'Change this color to the selected color';
-    b.onclick = () => {
-      const op = { type: 'swap', from: p.rgb, tol: Math.min(+$('#tol').value, 70), color: S.color, shade: $('#shade').checked }, test = copyID(S.work);
-      if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
-    };
+    b.onclick = () => openSwap(p.rgb, hx(p.rgb));
     el.appendChild(b);
   }
   if (!el.children.length) el.innerHTML = '<span class="hint">No solid colors found.</span>';
