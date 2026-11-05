@@ -329,7 +329,6 @@
         </div>
         <div class="stage white" id="embStage"><canvas id="embCanvas" width="1000" height="800"></canvas></div>
         <div id="embHatBox" class="hidden">
-          <div class="seg" id="embHatAngle" style="margin:4px 0 10px"><button data-hv="front" class="on">Front</button><button data-hv="angle">Angle</button></div>
           <label class="f">Hat color <small>The Game GB998 Perforated GameChanger</small></label>
           <div class="hats" id="embHats"></div>
           <p class="hint" id="embHatNote"></p>
@@ -2185,14 +2184,14 @@ $$('#embSizes button').forEach(btn => btn.onclick = () => { if (btn.dataset.h) {
    angle: the four corners (TL, TR, BR, BL) of the front-panel area on the 3/4 photo, as image fractions. */
 const HAT_WIDTH_IN = 7.6;
 const HATS = [
-  { id: 'navy-columbia', name: 'Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } },
-  { id: 'columbia-navy', name: 'Columbia · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.255, 0.31], [0.643, 0.245], [0.635, 0.675], [0.25, 0.745]] } },
+  { id: 'navy-columbia', name: 'Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: null },
+  { id: 'columbia-navy', name: 'Columbia · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: null },
   { id: 'columbia', name: 'Columbia', front: { cx: 0.5, cy: 0.555 }, angle: null },
   { id: 'navy', name: 'Navy', front: { cx: 0.5, cy: 0.555 }, angle: null },
-  { id: 'navy-white', name: 'Navy · White front', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.275, 0.3], [0.663, 0.235], [0.655, 0.665], [0.27, 0.735]] } },
-  { id: 'white-navy', name: 'White · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } },
-  { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } },
-  { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } }
+  { id: 'navy-white', name: 'Navy · White front', front: { cx: 0.5, cy: 0.555 }, angle: null },
+  { id: 'white-navy', name: 'White · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: null },
+  { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: null },
+  { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: null }
 ];
 EMB.view = 'stitch'; EMB.hat = 0; EMB.hatView = 'front';
 const hatImgs = {};
@@ -2272,7 +2271,7 @@ function puffImage(src) {
   return out;
 }
 function embHatRender() {
-  const hat = HATS[EMB.hat], view = hat.angle && EMB.hatView === 'angle' ? 'angle' : 'front', photo = hatImage(hat.id, view);
+  const hat = HATS[EMB.hat], view = 'front', photo = hatImage(hat.id, view);
   const cv = $('#embCanvas');
   if (!photo.complete || !photo.naturalWidth) { cv.width = 1000; cv.height = 760; return; }
   const W = 1000, H = Math.round(photo.naturalHeight * W / photo.naturalWidth); cv.width = W; cv.height = H;
@@ -2304,12 +2303,10 @@ function embHatChips() {
     const b = document.createElement('button'); b.className = 'hatchip' + (i === EMB.hat ? ' on' : ''); b.title = h.name;
     const im = document.createElement('img'); im.src = 'hats/' + h.id + '-front.webp'; im.className = 'hatimg'; im.alt = h.name; b.appendChild(im);
     const s = document.createElement('span'); s.textContent = h.name; b.appendChild(s);
-    b.onclick = () => { EMB.hat = i; $$('#embHats .hatchip').forEach((el, j) => el.classList.toggle('on', j === i)); $('#embHatAngle').classList.toggle('hidden', !h.angle); embHatRender(); };
+    b.onclick = () => { EMB.hat = i; $$('#embHats .hatchip').forEach((el, j) => el.classList.toggle('on', j === i)); embHatRender(); };
     box.appendChild(b);
   });
-  $('#embHatAngle').classList.toggle('hidden', !HATS[EMB.hat].angle);
 }
-$$('#embHatAngle button').forEach(btn => btn.onclick = () => { EMB.hatView = btn.dataset.hv; $$('#embHatAngle button').forEach(x => x.classList.toggle('on', x === btn)); embHatRender(); });
 $$('#embView button').forEach(btn => btn.onclick = () => {
   EMB.view = btn.dataset.v; $$('#embView button').forEach(x => x.classList.toggle('on', x === btn));
   $('#embHatBox').classList.toggle('hidden', EMB.view !== 'hat'); $('#embBg').classList.toggle('hidden', EMB.view === 'hat');
