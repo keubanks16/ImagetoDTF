@@ -546,7 +546,66 @@ function outerRegion(d, W, H, tol = 50) {
   if (!mode || hist[mode] < 20) return null; // no separate outline ring
   const lim = (mode + 1.5) * 3, mask = new Uint8Array(N); let n = 0;
   for (let p = 0; p < N; p++) if (dist[p] <= lim) { mask[p] = 1; n++; }
+  // Where one letter overlaps another (e.g. the S over the G), the top letter's outline crosses the
+  // inside of the design, in the same colour as the letter underneath. The top letter is the one whose
+  // fill is completely closed in by its own inner stroke; add an outline band just outside that stroke.
+  const lab = new Int32Array(N).fill(-1), fills = [], st = new Int32Array(N);
+  for (let p0 = 0; p0 < N; p0++) {
+    if (lab[p0] !== -1 || dist[p0] < INF || d[p0 * 4 + 3] < 128 || !ok(p0)) continue;
+    const id = fills.length; let sp2 = 0, cnt = 0; lab[p0] = id; st[sp2++] = p0;
+    while (sp2) { const p = st[--sp2], x = p % W; cnt++;
+      const nb = [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W];
+      for (const q of nb) if (q >= 0 && q < N && lab[q] === -1 && dist[q] >= INF && d[q * 4 + 3] >= 128 && ok(q)) { lab[q] = id; st[sp2++] = q; } }
+    fills.push({ id, cnt });
+  }
+  const order = fills.filter(f => f.cnt >= N * 0.004).sort((x, y) => y.cnt - x.cnt).slice(0, 6);
+  const dF = new Float32Array(N), reach = new Uint8Array(N), done = new Uint8Array(fills.length);
+  const chamfer = () => {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; let v = dF[p];
+      if (x > 0) v = Math.min(v, dF[p - 1] + 3);
+      if (y > 0) { v = Math.min(v, dF[p - W] + 3); if (x > 0) v = Math.min(v, dF[p - W - 1] + 4); if (x < W - 1) v = Math.min(v, dF[p - W + 1] + 4); }
+      dF[p] = v; }
+    for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const p = y * W + x; let v = dF[p];
+      if (x < W - 1) v = Math.min(v, dF[p + 1] + 3);
+      if (y < H - 1) { v = Math.min(v, dF[p + W] + 3); if (x < W - 1) v = Math.min(v, dF[p + W + 1] + 4); if (x > 0) v = Math.min(v, dF[p + W - 1] + 4); }
+      dF[p] = v; }
+  };
+  for (const f of order) {
+    for (let p = 0; p < N; p++) dF[p] = lab[p] === f.id ? 0 : 1e9;
+    chamfer();
+    // inner stroke width around this fill
+    const h = new Uint32Array(600);
+    for (let p = 0; p < N; p++) {
+      if (lab[p] === f.id || d[p * 4 + 3] < 128 || !ok(p) || dF[p] > 1700) continue;
+      const x = p % W, nb = [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W];
+      for (const q of nb) if (q >= 0 && q < N && d[q * 4 + 3] >= 128 && !ok(q)) { const k = Math.round(dF[p] / 3); if (k > 0 && k < 600) h[k]++; break; }
+    }
+    let sw = 0; for (let k = 1; k < 600; k++) if (h[k] > h[sw]) sw = k;
+    if (!sw || h[sw] < 20) continue;
+    const wall = p => d[p * 4 + 3] >= 128 && !ok(p) && dF[p] <= (sw + 0.5) * 3;
+    reach.fill(0); let sp2 = 0;
+    const go = p => { if (!reach[p] && lab[p] !== f.id && !wall(p)) { reach[p] = 1; st[sp2++] = p; } };
+    for (let x = 0; x < W; x++) { go(x); go((H - 1) * W + x); }
+    for (let y = 0; y < H; y++) { go(y * W); go(y * W + W - 1); }
+    while (sp2) { const p = st[--sp2], x = p % W;
+      if (x > 0) go(p - 1); if (x < W - 1) go(p + 1); if (p >= W) go(p - W); if (p < N - W) go(p + W); }
+    let closed = true;
+    for (let p = 0; p < N; p++) if (!reach[p] && lab[p] !== f.id && !wall(p)) { closed = false; break; }
+    if (!closed) continue; // its stroke doesn't fully wrap the fill: not a top letter
+    const bl = (sw + mode + 0.5) * 3;
+    for (let p = 0; p < N; p++)
+      if (!mask[p] && reach[p] && dF[p] <= bl && d[p * 4 + 3] >= 16 && ok(p) && !(lab[p] >= 0 && done[lab[p]])) { mask[p] = 1; n++; }
+    done[f.id] = 1;
+  }
   return n ? { mask, seed, tol, n } : null;
+}
+// The outline is worked out once from the original design, so it stays put after colour edits.
+function getOuter(cur) {
+  if (S._outerBase !== S.base) { S._outerBase = S.base; S._outer = outerRegion(S.base.data, S.W, S.H); }
+  const o = S._outer; if (!o) return null;
+  const d = cur.data; let r = 0, g = 0, b = 0, k = 0;
+  for (let p = 0; p < S.W * S.H; p += 7) if (o.mask[p] && d[p * 4 + 3] >= 200) { r += d[p * 4]; g += d[p * 4 + 1]; b += d[p * 4 + 2]; k++; }
+  return k ? { mask: o.mask, seed: [r / k, g / k, b / k].map(Math.round), tol: o.tol, n: o.n } : null;
 }
 function colorRegion(d, W, H, from, tol) {
   const N = W * H, mask = new Uint8Array(N); let n = 0;
@@ -558,13 +617,13 @@ function colorRegion(d, W, H, from, tol) {
 function applyOp(img, op) {
   const d = img.data, W = img.width, H = img.height;
   if (op.type === 'outer') {
-    const r = outerRegion(d, W, H);
+    const r = getOuter(img);
     if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
     return !!r;
   }
   if (op.type === 'swap') {
     const r = colorRegion(d, W, H, op.from, op.tol);
-    if (r && op.keepOuter) { const o = outerRegion(d, W, H); if (o) for (let p = 0; p < W * H; p++) if (o.mask[p]) r.mask[p] = 0; }
+    if (r && op.keepOuter) { const o = getOuter(img); if (o) for (let p = 0; p < W * H; p++) if (o.mask[p]) r.mask[p] = 0; }
     if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
     return !!r;
   }
@@ -890,7 +949,7 @@ function drawPalette() {
   const el = $('#palette'); if (!el || !S.work) return;
   el.innerHTML = '';
   const { total, colors } = palette(S.work);
-  const o = outerRegion(S.work.data, S.W, S.H);
+  const o = getOuter(S.work);
   // only offer "Outer outline" when the outside edge is a separate ring, not the whole design
   const ring = o && total && o.n / (total * 4) < 0.55 ? o : null;
   const chip = (html, fn) => { const b = document.createElement('button'); b.innerHTML = html; b.onclick = fn; el.appendChild(b); return b; };
