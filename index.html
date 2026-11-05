@@ -97,7 +97,17 @@
   .gsc i{width:20px;height:20px;border-radius:50%;display:block;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
   .gsc.on{border-color:var(--accent2);box-shadow:0 0 0 2px var(--accent2)}
   .gsrow input[type=text]{width:96px;padding:8px;border:1px solid var(--line);border-radius:9px;font-size:16px}
-  #gsCanvas{display:block;width:100%;height:auto}
+  #gsCanvas,#embCanvas{display:block;width:100%;height:auto}
+  .embt{width:100%;border-collapse:collapse;font-size:14px}
+  .embt th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:4px 4px 6px}
+  .embt td{padding:8px 4px;border-top:1px solid var(--line);vertical-align:middle}
+  .embt td:last-child{text-align:right;white-space:nowrap}
+  .embt .btn{padding:8px 14px;font-size:14px}
+  .hats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .hatchip{border:1px solid var(--line);background:#fff;border-radius:10px;padding:4px 2px 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
+  .hatchip.on{border-color:var(--accent2);box-shadow:0 0 0 2px var(--accent2)}
+  .hatchip .hatimg{width:100%;max-width:84px;height:auto}
+  .hatchip span{font-size:10.5px;font-weight:600;color:var(--ink);text-align:center;line-height:1.15}
 </style>
 </head>
 <body>
@@ -110,6 +120,7 @@
 <div class="tabs"><div class="seg" id="appTabs">
   <button data-tab="dtf" class="on">Image → DTF</button>
   <button data-tab="gs">Vectorized GS Logo</button>
+  <button data-tab="emb">Embroidery</button>
 </div></div>
 
 <main id="dtfMain">
@@ -301,7 +312,74 @@
   </div>
 </main>
 
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 1:20 AM — crossbar angle fix</p>
+
+<main id="embMain" class="hidden">
+  <div class="grid">
+    <div>
+      <div class="card sticky">
+        <div class="seg" id="embView" style="margin-bottom:10px">
+          <button data-v="stitch" class="on">Stitches</button>
+          <button data-v="hat">3D puff on hat</button>
+        </div>
+        <div class="chips" id="embBg" style="margin-bottom:10px">
+          <button data-bg="white" class="on">White shirt</button>
+          <button data-bg="black">Black shirt</button>
+          <button data-bg="gray">Gray</button>
+          <button data-bg="navy">Navy</button>
+        </div>
+        <div class="stage white" id="embStage"><canvas id="embCanvas" width="1000" height="800"></canvas></div>
+        <div id="embHatBox" class="hidden">
+          <label class="f">Hat color <small>The Game GB998 Perforated GameChanger</small></label>
+          <div class="hats" id="embHats"></div>
+          <p class="hint" id="embHatNote"></p>
+        </div>
+        <div class="stat" id="embStat">—</div>
+        <p class="hint">Stitch preview: every line is a stitch. Auto-digitized with tatami fill — always sew a test on scrap fabric before a full run.</p>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Design</h2>
+        <div class="seg" id="embSrc">
+          <button data-src="gs" class="on">GS Logo</button>
+          <button data-src="upload">My uploaded design</button>
+        </div>
+        <p class="hint" id="embSrcNote">Uses the colors and style you picked on the <b>Vectorized GS Logo</b> page. Transparent parts aren't stitched.</p>
+      </div>
+      <div class="card">
+        <h2>Size</h2>
+        <label class="f">Design width (inches)</label>
+        <div class="row">
+          <input type="number" id="embW" value="3.5" min="1" max="12" step="0.25">
+          <div class="chips" id="embSizes">
+            <button data-w="2.5">Hat</button><button data-w="3.5" class="on">Left chest</button><button data-w="5">5"</button><button data-w="8">Full front 8"</button>
+          </div>
+        </div>
+        <label class="f">Fill density</label>
+        <div class="seg" id="embDensity">
+          <button data-d="5">Light</button><button data-d="4" class="on">Standard</button><button data-d="3.5">Dense</button>
+        </div>
+        <label class="f">Stitch direction</label>
+        <div class="seg" id="embAngle">
+          <button data-a="45" class="on">45°</button><button data-a="135">135°</button><button data-a="0">Horizontal</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Export</h2>
+        <table class="embt">
+          <tr><th>File</th><th>Purpose</th><th></th></tr>
+          <tr><td><b>DST</b></td><td>Commercial embroidery machines (Tajima & most multi-needle)</td><td><button class="btn dark" data-fmt="dst">DST</button></td></tr>
+          <tr><td><b>PES</b></td><td>Brother (and Babylock) embroidery machines</td><td><button class="btn dark" data-fmt="pes">PES</button></td></tr>
+          <tr><td><b>JEF</b></td><td>Janome embroidery machines</td><td><button class="btn dark" data-fmt="jef">JEF</button></td></tr>
+          <tr><td><b>EMB</b></td><td>Editable Wilcom design file</td><td><button class="btn" id="embEmb">How?</button></td></tr>
+        </table>
+        <p class="hint hidden" id="embEmbNote"><b>EMB is Wilcom's private format</b> — only Wilcom software (EmbroideryStudio / Hatch) can create it, so no web app can write a real EMB. To get one: download the <b>DST</b>, open it in Wilcom/Hatch, and choose <b>File → Save As → .EMB</b>. Your digitizer can also rebuild it as fully editable objects in Wilcom from the SVG on the Vectorized GS Logo page.</p>
+        <p class="hint" id="embDone"></p>
+      </div>
+    </div>
+  </div>
+</main>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 1:45 AM — Embroidery page (DST · PES · JEF) + 3D puff hat preview</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -1664,10 +1742,472 @@ $$('#appTabs button').forEach(btn => btn.onclick = () => {
   $$('#appTabs button').forEach(x => x.classList.toggle('on', x === btn));
   $('#dtfMain').classList.toggle('hidden', btn.dataset.tab !== 'dtf');
   $('#gsMain').classList.toggle('hidden', btn.dataset.tab !== 'gs');
+  $('#embMain').classList.toggle('hidden', btn.dataset.tab !== 'emb');
   if (btn.dataset.tab === 'gs') gsRender();
+  if (btn.dataset.tab === 'emb') embRefresh();
 });
 gsBuildUI(); setGsStyle(3);
 window.__gs = { gsDraw }; // for testing
+/* ---------------- Embroidery ----------------
+   Auto-digitizer: the design is drawn at 0.1 mm per pixel, every pixel is snapped to one thread
+   colour, and each colour is filled with tatami (rows of running stitches 0.35–0.5 mm apart, stitch
+   points staggered row to row). Rows are chained into continuous runs; separate areas are joined
+   with a trim + jump. The stitch list is then written out as DST, PES (v1) or JEF.
+   Units in the stitch list: 0.1 mm, y pointing down, centred on the design. */
+const EMB = { src: 'gs', stream: null, colors: null, info: null, timer: 0 };
+const PEC_THREADS = [null, [14,31,124,'Prussian Blue'],[10,85,163,'Blue'],[0,135,119,'Teal Green'],[75,107,175,'Cornflower Blue'],[237,23,31,'Red'],[209,92,0,'Reddish Brown'],[145,54,151,'Magenta'],[228,154,203,'Light Lilac'],[145,95,172,'Lilac'],[158,214,125,'Mint Green'],[232,169,0,'Deep Gold'],[254,186,53,'Orange'],[255,255,0,'Yellow'],[112,188,31,'Lime Green'],[186,152,0,'Brass'],[168,168,168,'Silver'],[125,111,0,'Russet Brown'],[255,255,179,'Cream Brown'],[79,85,86,'Pewter'],[0,0,0,'Black'],[11,61,145,'Ultramarine'],[119,1,118,'Royal Purple'],[41,49,51,'Dark Gray'],[42,19,1,'Dark Brown'],[246,74,138,'Deep Rose'],[178,118,36,'Light Brown'],[252,187,197,'Salmon Pink'],[254,55,15,'Vermilion'],[240,240,240,'White'],[106,28,138,'Violet'],[168,221,196,'Seacrest'],[37,132,187,'Sky Blue'],[254,179,67,'Pumpkin'],[255,243,107,'Cream Yellow'],[208,166,96,'Khaki'],[209,84,0,'Clay Brown'],[102,186,73,'Leaf Green'],[19,74,70,'Peacock Blue'],[135,135,135,'Gray'],[216,204,198,'Warm Gray'],[67,86,7,'Dark Olive'],[253,217,222,'Flesh Pink'],[249,147,188,'Pink'],[0,56,34,'Deep Green'],[178,175,212,'Lavender'],[104,106,176,'Wisteria Violet'],[239,227,185,'Beige'],[247,56,102,'Carmine'],[181,75,100,'Amber Red'],[19,43,26,'Olive Green'],[199,1,86,'Dark Fuchsia'],[254,158,50,'Tangerine'],[168,222,235,'Light Blue'],[0,103,62,'Emerald Green'],[78,41,144,'Purple'],[47,126,32,'Moss Green'],[255,204,204,'Flesh Pink'],[255,217,17,'Harvest Gold'],[9,91,166,'Electric Blue'],[240,249,112,'Lemon Yellow'],[227,243,91,'Fresh Green'],[255,153,0,'Orange'],[255,240,141,'Cream Yellow'],[255,200,200,'Applique']];
+const JEF_THREADS = [null,0x000000,0xFFFFFF,0xFFFF17,0xFF6600,0x2F5933,0x237336,0x65C2C8,0xAB5A96,0xF669A0,0xFF0000,0xB1704E,0x0B2F84,0xE4C35D,0x481A05,0xAC9CC7,0xFCF294,0xF999B7,0xFAB381,0xC9A480,0x970533,0xA0B8CC,0x7FC21C,0xE5E5E5,0x889B9B,0x98D6BD,0xB2E1E3,0x368BA0,0x4F83AB,0x386A91,0x071650,0xF999A2,0xF9676B,0xE3311F,0xE2A188,0xB59474,0xE4CF99,0xFFCB00,0xE1ADD4,0xC3007E,0x80004B,0x540571,0xB10525,0xCAE0C0,0x899856,0x5C941A,0x003114,0x5DAE94,0x4CBF8F,0x007772,0x595B61,0xFFFFF2,0xB15818,0xCB8A07,0x986C80,0x98692D,0x4D3419,0x4C330B,0x33200A,0x523A97,0x0D217E,0x1E77AC,0xB2DD53,0xF33689,0xDE649E,0x984161,0x4C5612,0x4C881F,0xE4DE79,0xCB8A1A,0xCBA21C,0xFF9805,0xFCB257,0xFFE505,0xF0331F,0x1A842D,0x386CAE,0xE3C4B4,0xE3AC81].map(v => v === null ? null : [(v >> 16) & 255, (v >> 8) & 255, v & 255]);
+function redMean(a, b) { const rm = Math.round((a[0] + b[0]) / 2), r = a[0] - b[0], g = a[1] - b[1], bl = a[2] - b[2]; return (((512 + rm) * r * r) >> 8) + 4 * g * g + (((767 - rm) * bl * bl) >> 8); }
+function nearestIdx(c, list) { let bi = null, bd = Infinity; list.forEach((t, i) => { if (!t) return; const d = redMean(c, t); if (d <= bd) { bd = d; bi = i; } }); return bi; }
+
+/* 1. design → label map at 0.1 mm per pixel */
+function embSource() {
+  const Wmm = Math.max(1, Math.min(12, +$('#embW').value || 3.5)) * 25.4, w = Math.round(Wmm * 10);
+  let cv, colors = [];
+  if (EMB.src === 'gs') {
+    const { b } = gsSize(), k = w / (b[2] - b[0]), h = Math.round((b[3] - b[1]) * k);
+    cv = mk(w, h); gsDraw(cv.getContext('2d'), k, b[0], b[1]);
+    const parts = gsStyle === 2 ? ['inner', 'face'] : ['outer', 'inner', 'face'];
+    for (const p of parts) if (!gsState[p].clear) { const c = hex2rgb(gsState[p].c.toLowerCase()); if (!colors.some(x => x.join() === c.join())) colors.push(c); }
+  } else {
+    if (!S.work) return null;
+    const h = Math.round(w * S.H / S.W); cv = mk(w, h);
+    const t = mk(S.W, S.H); t.getContext('2d').putImageData(S.work, 0, 0);
+    const x = cv.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(t, 0, 0, w, h);
+    colors = logoColors(S.work).slice(0, 8);
+  }
+  const W = cv.width, H = cv.height, d = cv.getContext('2d').getImageData(0, 0, W, H).data, lab = new Uint8Array(W * H), area = new Array(colors.length).fill(0);
+  for (let p = 0; p < W * H; p++) { const i = p * 4; if (d[i + 3] < 128) continue;
+    let bk = 0, bd = 1e9; colors.forEach((c, k) => { const dd = (d[i] - c[0]) ** 2 + (d[i + 1] - c[1]) ** 2 + (d[i + 2] - c[2]) ** 2; if (dd < bd) { bd = dd; bk = k; } });
+    lab[p] = bk + 1; area[bk]++; }
+  if (EMB.src === 'upload') { // sew big areas first, small details on top
+    const ord = colors.map((c, k) => k).sort((a, b) => area[b] - area[a]), map = new Uint8Array(colors.length + 1);
+    ord.forEach((k, i) => map[k + 1] = i + 1); for (let p = 0; p < W * H; p++) lab[p] = map[lab[p]];
+    colors = ord.map(k => colors[k]);
+  }
+  const keep = colors.map((c, k) => k).filter(k => lab.some(v => v === k + 1));
+  return { lab, W, H, colors, used: keep };
+}
+
+/* 2. tatami fill digitizer */
+function embDigitize(src, spacing, angleDeg) {
+  const { lab, W, H, colors } = src, N = W * H, cx = W / 2, cy = H / 2;
+  const th = angleDeg * Math.PI / 180, c = Math.cos(th), s = Math.sin(th), D = Math.ceil(Math.hypot(W, H) / 2) + 2;
+  const L = 35, blocks = [];
+  for (let k = 1; k <= colors.length; k++) {
+    // mask grown by 0.2 mm so neighbouring colours overlap a touch (no gaps when the fabric pulls)
+    let m = new Uint8Array(N); for (let p = 0; p < N; p++) if (lab[p] === k) m[p] = 1;
+    for (let it = 0; it < 2; it++) { const n2 = m.slice();
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; if (m[p]) continue;
+        if ((x > 0 && m[p - 1]) || (x < W - 1 && m[p + 1]) || (y > 0 && m[p - W]) || (y < H - 1 && m[p + W])) n2[p] = 1; }
+      m = n2; }
+    const rows = []; let ri = 0;
+    for (let v = -D; v <= D; v += spacing, ri++) {
+      const segs = []; let a = null;
+      for (let u = -D; u <= D; u++) {
+        const x = Math.round(cx + u * c - v * s), y = Math.round(cy + u * s + v * c);
+        const on = x >= 0 && y >= 0 && x < W && y < H && m[y * W + x];
+        if (on && a === null) a = u; else if (!on && a !== null) { if (u - 1 - a >= 3) segs.push({ r: ri, v, a, b: u - 1, used: false }); a = null; }
+      }
+      rows.push(segs);
+    }
+    const all = rows.flat(); if (!all.length) continue;
+    const chains = []; let px = null, py = null;
+    const toXY = (u, v) => [u * c - v * s, u * s + v * c];
+    while (true) {
+      // next run: the unused row-segment end closest to where the needle is
+      let best = null, bd = Infinity, bdir = 1;
+      for (const g of all) { if (g.used) continue;
+        if (px === null) { best = g; bdir = 1; break; }
+        for (const [uu, dir] of [[g.a, 1], [g.b, -1]]) { const [x, y] = toXY(uu, g.v), dd = (x - px) ** 2 + (y - py) ** 2; if (dd < bd) { bd = dd; best = g; bdir = dir; } } }
+      if (!best) break;
+      const chain = []; let cur = best, dir = bdir;
+      while (cur) {
+        cur.used = true; chain.push([cur, dir]);
+        const exit = dir > 0 ? cur.b : cur.a, nr = rows[cur.r + 1]; let nx = null, nd = Infinity;
+        if (nr) for (const g of nr) { if (g.used || g.a > cur.b || g.b < cur.a) continue;
+          const st = -dir > 0 ? g.a : g.b, dd = Math.abs(st - exit); if (dd < nd && dd <= 30) { nd = dd; nx = g; } }
+        cur = nx; dir = -dir;
+      }
+      // stitch points
+      const pts = [];
+      for (const [g, dir] of chain) {
+        const from = dir > 0 ? g.a : g.b, to = dir > 0 ? g.b : g.a, off = (g.r % 3) * L / 3;
+        pts.push(toXY(from, g.v));
+        let u = dir > 0 ? Math.ceil((from - off) / L) * L + off : Math.floor((from - off) / L) * L + off;
+        for (; dir > 0 ? u < to : u > to; u += dir * L) if (Math.abs(u - from) > 8 && Math.abs(to - u) > 8) pts.push(toXY(u, g.v));
+        pts.push(toXY(to, g.v));
+      }
+      const last = pts[pts.length - 1]; px = last[0]; py = last[1];
+      chains.push(pts.map(([x, y]) => [Math.round(x), Math.round(y)]));
+    }
+    blocks.push({ color: colors[k - 1], chains });
+  }
+  return blocks;
+}
+
+/* 3. stitch stream: [x, y, cmd]  cmd: S stitch, J jump, T trim, C colour change, E end */
+function embStream(blocks) {
+  const out = []; let x = 0, y = 0;
+  const lock = (pts, i, j) => { // tiny back-and-forth tie stitches
+    const [ax, ay] = pts[i], [bx, by] = pts[j] || pts[i], l = Math.hypot(bx - ax, by - ay) || 1, t = Math.min(6, l) / l;
+    const mx = Math.round(ax + (bx - ax) * t), my = Math.round(ay + (by - ay) * t);
+    out.push([mx, my, 'S'], [ax, ay, 'S'], [mx, my, 'S'], [ax, ay, 'S']); };
+  blocks.forEach((b, bi) => {
+    if (bi > 0) { out.push([x, y, 'T']); out.push([x, y, 'C']); }
+    b.chains.forEach((pts, ci) => {
+      const [sx, sy] = pts[0], far = Math.hypot(sx - x, sy - y) > 20;
+      if (out.length === 0 || ci === 0 || far) {
+        const prev = out.length ? out[out.length - 1][2] : null;
+        if (prev === 'S') out.push([x, y, 'T']);
+        out.push([sx, sy, 'J']); out.push([sx, sy, 'S']); lock(pts, 0, 1);
+      } else out.push([sx, sy, 'S']); // short hop inside the same area
+      for (let i = 1; i < pts.length; i++) out.push([pts[i][0], pts[i][1], 'S']);
+      const n = pts.length; lock(pts, n - 1, n - 2);
+      [x, y] = pts[n - 1];
+    });
+  });
+  out.push([x, y, 'T']); out.push([x, y, 'E']);
+  return out;
+}
+
+/* 4. file writers (byte layout follows pyembroidery's DST / PES v1 / JEF writers) */
+class Bytes { constructor() { this.a = []; } u8(v) { this.a.push(v & 255); } i8(v) { this.u8(v); }
+  u16(v) { this.u8(v); this.u8(v >> 8); } u16be(v) { this.u8(v >> 8); this.u8(v); } u24(v) { this.u16(v); this.u8(v >> 16); } u32(v) { this.u16(v); this.u16(v >>> 16); }
+  f32(v) { const b = new DataView(new ArrayBuffer(4)); b.setFloat32(0, v, true); for (let i = 0; i < 4; i++) this.u8(b.getUint8(i)); }
+  str(t) { for (const ch of t) this.u8(ch.charCodeAt(0)); } bytes(arr) { for (const v of arr) this.u8(v); }
+  set24(pos, v) { this.a[pos] = v & 255; this.a[pos + 1] = (v >> 8) & 255; this.a[pos + 2] = (v >> 16) & 255; }
+  set16(pos, v) { this.a[pos] = v & 255; this.a[pos + 1] = (v >> 8) & 255; } set32(pos, v) { this.set16(pos, v); this.set16(pos + 2, v >>> 16); }
+  get pos() { return this.a.length; } blob(type) { return new Blob([new Uint8Array(this.a)], { type: type || 'application/octet-stream' }); } }
+// low-level stitch list for a format: long jumps split, trims/colour changes in that format's style
+function embLow(stream, maxJump, opts = {}) {
+  const st = []; let x = 0, y = 0;
+  for (const [tx, ty, cmd] of stream) {
+    if (cmd === 'J' || cmd === 'S') {
+      const dx = tx - x, dy = ty - y, n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxJump));
+      for (let i = 1; i <= n; i++) st.push([Math.round(x + dx * i / n), Math.round(y + dy * i / n), cmd === 'J' || i < n ? 'J' : 'S']);
+      x = tx; y = ty;
+    } else if (cmd === 'T') { if (opts.trims) st.push([x, y, 'T']); }
+    else st.push([x, y, cmd]);
+  }
+  return st;
+}
+function embBounds(st) { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const [x, y] of st) { if (x < a) a = x; if (y < b) b = y; if (x > c) c = x; if (y > d) d = y; } return [a, b, c, d]; }
+function dstRecord(x, y, flag) {
+  y = -y; let b0 = 0, b1 = 0, b2 = 0;
+  if (flag === 'C') return [0, 0, 0xC3]; if (flag === 'E') return [0, 0, 0xF3];
+  if (flag === 'J') b2 += 0x80;
+  b2 += 3;
+  if (x > 40) { b2 += 4; x -= 81; } if (x < -40) { b2 += 8; x += 81; } if (x > 13) { b1 += 4; x -= 27; } if (x < -13) { b1 += 8; x += 27; }
+  if (x > 4) { b0 += 4; x -= 9; } if (x < -4) { b0 += 8; x += 9; } if (x > 1) { b1 += 1; x -= 3; } if (x < -1) { b1 += 2; x += 3; }
+  if (x > 0) { b0 += 1; x -= 1; } if (x < 0) { b0 += 2; x += 1; }
+  if (y > 40) { b2 += 32; y -= 81; } if (y < -40) { b2 += 16; y += 81; } if (y > 13) { b1 += 32; y -= 27; } if (y < -13) { b1 += 16; y += 27; }
+  if (y > 4) { b0 += 32; y -= 9; } if (y < -4) { b0 += 16; y += 9; } if (y > 1) { b1 += 128; y -= 3; } if (y < -1) { b1 += 64; y += 3; }
+  if (y > 0) { b0 += 128; y -= 1; } if (y < 0) { b0 += 64; y += 1; }
+  return [b0, b1, b2];
+}
+function writeDST(stream, name) {
+  const st = embLow(stream, 121, { trims: true }), b = new Bytes(), bd = embBounds(st);
+  let recs = 0; for (const s of st) recs += s[2] === 'T' ? 3 : 1;
+  const pad = (v, n) => String(v).padStart(n, ' ');
+  const last = st[st.length - 1];
+  b.str(`LA:${name.slice(0, 16).padEnd(16, ' ')}\r`); b.str(`ST:${pad(recs, 7)}\r`); b.str(`CO:${pad(st.filter(s => s[2] === 'C').length, 3)}\r`);
+  b.str(`+X:${pad(Math.abs(bd[2]), 5)}\r`); b.str(`-X:${pad(Math.abs(bd[0]), 5)}\r`); b.str(`+Y:${pad(Math.abs(bd[3]), 5)}\r`); b.str(`-Y:${pad(Math.abs(bd[1]), 5)}\r`);
+  const ax = last[0], ay = -last[1];
+  b.str(`AX:${ax >= 0 ? '+' : '-'}${pad(Math.abs(ax), 5)}\r`); b.str(`AY:${ay >= 0 ? '+' : '-'}${pad(Math.abs(ay), 5)}\r`);
+  b.str(`MX:+${pad(0, 5)}\r`); b.str(`MY:+${pad(0, 5)}\r`); b.str(`PD:******\r`); b.u8(0x1A);
+  while (b.pos < 512) b.u8(0x20);
+  let xx = 0, yy = 0;
+  for (const [x, y, f] of st) {
+    const dx = x - xx, dy = y - yy; xx += dx; yy += dy;
+    if (f === 'T') { b.bytes(dstRecord(2, 2, 'J')); b.bytes(dstRecord(-4, -4, 'J')); b.bytes(dstRecord(2, 2, 'J')); }
+    else b.bytes(dstRecord(dx, dy, f));
+  }
+  return b.blob();
+}
+function pecColorIndexes(colors) { // nearest Brother thread per colour, each palette slot used once
+  const pal = PEC_THREADS.slice(), chart = new Array(pal.length).fill(null);
+  const uniq = []; colors.forEach(c => { if (!uniq.some(u => u.join() === c.join())) uniq.push(c); });
+  for (const c of uniq) { const i = nearestIdx(c, pal); if (i === null) break; pal[i] = null; chart[i] = c; }
+  return colors.map(c => nearestIdx(c, chart));
+}
+const PEC_BLANK = [0,0,0,0,0,0,0xf0,0xff,0xff,0xff,0xff,0xf,0x8,0,0,0,0,0x10,0x4,0,0,0,0,0x20].concat(...Array(32).fill([0x2,0,0,0,0,0x40])).concat([0x4,0,0,0,0,0x20,0x8,0,0,0,0,0x10,0xf0,0xff,0xff,0xff,0xff,0xf,0,0,0,0,0,0]);
+function pecIcon(pts, bd, buffer) {
+  const g = PEC_BLANK.slice(), dw = (bd[2] - bd[0]) || 1, dh = (bd[3] - bd[1]) || 1;
+  const sc = Math.min((48 - buffer) / dw, (38 - buffer) / dh), cx = (bd[2] + bd[0]) / 2, cy = (bd[3] + bd[1]) / 2;
+  for (const [x, y] of pts) { const gx = Math.floor((x - cx) * sc + 24), gy = Math.floor((y - cy) * sc + 19);
+    if (gx >= 0 && gy >= 0 && gx < 48 && gy < 38) g[gy * 6 + (gx >> 3)] |= 1 << (gx & 7); }
+  return g;
+}
+function writePEC(b, st, colors, name) {
+  const bd = embBounds(st), idx = pecColorIndexes(colors);
+  b.str(`LA:${name.slice(0, 8).padEnd(16, ' ')}\r`); b.bytes([0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0x20,0xFF,0x00]); b.u8(6); b.u8(38);
+  b.bytes(Array(12).fill(0x20)); b.u8(idx.length - 1); b.bytes(idx); for (let i = idx.length; i < 463; i++) b.u8(0x20);
+  const start = b.pos; b.bytes([0, 0]); b.u24(0); b.bytes([0x31, 0xff, 0xf0]); b.u16(Math.round(bd[2] - bd[0])); b.u16(Math.round(bd[3] - bd[1])); b.u16(0x1E0); b.u16(0x1B0);
+  const val = (v, long, flag) => { if (!long && v > -64 && v < 63) b.u8(v & 0x7F); else { v = (v & 0x0FFF) | 0x8000 | (flag << 8); b.u8(v >> 8); b.u8(v); } };
+  let xx = 0, yy = 0, jumping = true, init = true, two = true;
+  for (const [x, y, f] of st) {
+    const dx = x - xx, dy = y - yy; xx += dx; yy += dy;
+    if (f === 'S') { if (jumping) { if (dx !== 0 && dy !== 0) { val(0); val(0); } jumping = false; } val(dx); val(dy); }
+    else if (f === 'J') { jumping = true; const fl = init ? 0x10 : 0x20; val(dx, true, fl); val(dy, true, fl); }
+    else if (f === 'C') { if (jumping) { val(0); val(0); jumping = false; } b.bytes([0xfe, 0xb0, two ? 2 : 1]); two = !two; }
+    else if (f === 'E') { b.u8(0xff); break; }
+    init = false;
+  }
+  b.set24(start + 2, b.pos - start);
+  b.bytes(pecIcon(st.filter(s => s[2] === 'S'), bd, 4));
+  let cur = []; const blocks = [];
+  for (const s of st) { if (s[2] === 'C') { blocks.push(cur); cur = []; } else if (s[2] === 'S') cur.push(s); }
+  blocks.push(cur);
+  for (const bl of blocks) b.bytes(pecIcon(bl, bd, 5));
+}
+function writePES(stream, colors, name) {
+  const st = embLow(stream, 2047), b = new Bytes(), bd = embBounds(st);
+  const cx = (bd[2] + bd[0]) / 2, cy = (bd[3] + bd[1]) / 2, left = bd[0] - cx, top = bd[1] - cy, right = bd[2] - cx, bottom = bd[3] - cy;
+  b.str('#PES0001'); const pecPtr = b.pos; b.u32(0);
+  b.u16(1); b.u16(1); b.u16(1); b.u16(0xFFFF); b.u16(0);
+  const str16 = t => { b.u16(t.length); b.str(t); };
+  str16('CEmbOne');
+  const width = right - left, height = bottom - top;
+  for (let i = 0; i < 8; i++) b.u16(0);
+  const tx = 350 + 1300 / 2 - width / 2, ty = 100 + height + 1800 / 2 - height / 2;
+  b.f32(1); b.f32(0); b.f32(0); b.f32(1); b.f32(tx); b.f32(ty);
+  b.u16(1); b.u16(0); b.u16(0); b.u16(Math.trunc(width)); b.u16(Math.trunc(height)); b.bytes([0, 0, 0, 0, 0, 0, 0, 0]);
+  const secPtr = b.pos; b.u16(0);
+  b.u16(0xFFFF); b.u16(0);
+  str16('CSewSeg');
+  const codes = colors.map(c => nearestIdx(c, PEC_THREADS));
+  const ax = left + cx, ay = bottom + cy;
+  // group consecutive commands like pyembroidery's get_as_command_blocks
+  const groups = []; for (const s of st) { const g = groups[groups.length - 1]; if (g && g.cmd === s[2]) g.list.push(s); else groups.push({ cmd: s[2], list: [s] }); }
+  let section = 0, flag = -1, prevCode = -1, ci = 0, code = codes[0], sx = 0, sy = 0; const log = [];
+  for (const g of groups) {
+    let pts, fl;
+    if (g.cmd === 'J') { const l = g.list[g.list.length - 1]; pts = [[sx - ax, sy - ay], [l[0] - ax, l[1] - ay]]; fl = 1; }
+    else if (g.cmd === 'C') { ci++; code = codes[ci]; continue; }
+    else if (g.cmd === 'S') { pts = g.list.map(s => { sx = s[0]; sy = s[1]; return [s[0] - ax, s[1] - ay]; }); fl = 0; }
+    else continue;
+    if (flag !== -1) b.u16(0x8003);
+    if (prevCode !== code) { log.push([section, code]); prevCode = code; }
+    flag = fl; b.u16(fl); b.u16(code); b.u16(pts.length); for (const [x, y] of pts) { b.u16(Math.trunc(x)); b.u16(Math.trunc(y)); }
+    section++;
+  }
+  b.u16(log.length); for (const [s1, c1] of log) { b.u16(s1); b.u16(c1); }
+  b.set16(secPtr, section);
+  b.u16(0); b.u16(0);
+  b.set32(pecPtr, b.pos);
+  writePEC(b, st, colors, name);
+  return b.blob();
+}
+function writeJEF(stream, colors) {
+  const st = embLow(stream, 127), b = new Bytes(), bd = embBounds(st);
+  const thr = JEF_THREADS.slice(); const pal = []; let lastI = null, lastC = null;
+  for (const c of colors) { let i = nearestIdx(c, thr);
+    if (lastI === i && lastC && lastC.join() !== c.join()) { const keep = thr[i]; thr[i] = null; i = nearestIdx(c, thr); thr[lastI] = keep; }
+    pal.push(i); lastI = i; lastC = c; }
+  const n = colors.length, d = new Date(), z = v => String(v).padStart(2, '0');
+  b.u32(0x74 + n * 8); b.u32(0x14); b.str(`${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}`); b.u8(0); b.u8(0);
+  b.u32(n);
+  let pc = 1; for (const s of st) { if (s[2] === 'S') pc++; else if (s[2] === 'J' || s[2] === 'C') pc += 2; else if (s[2] === 'E') break; }
+  b.u32(pc);
+  const dw = Math.round(bd[2] - bd[0]), dh = Math.round(bd[3] - bd[1]);
+  b.u32(dw < 500 && dh < 500 ? 1 : dw < 1260 && dh < 1100 ? 3 : dw < 1400 && dh < 2000 ? 2 : dw < 2000 && dh < 2000 ? 4 : 0);
+  const hw = Math.round(dw / 2), hh = Math.round(dh / 2); b.u32(hw); b.u32(hh); b.u32(hw); b.u32(hh);
+  const edge = (x, y) => { if (Math.min(x, y) >= 0) { b.u32(x); b.u32(y); b.u32(x); b.u32(y); } else { b.u32(-1); b.u32(-1); b.u32(-1); b.u32(-1); } };
+  edge(550 - hw, 550 - hh); edge(250 - hw, 250 - hh); edge(700 - hw, 1000 - hh); edge(700 - hw, 1000 - hh);
+  for (const t of pal) b.u32(t); for (let i = 0; i < n; i++) b.u32(0x0D);
+  let xx = 0, yy = 0;
+  for (const [x, y, f] of st) {
+    const dx = x - xx, dy = y - yy; xx += dx; yy += dy;
+    if (f === 'S') { b.i8(dx); b.i8(-dy); }
+    else if (f === 'C') { b.bytes([0x80, 0x01]); b.i8(dx); b.i8(-dy); }
+    else if (f === 'J') { b.bytes([0x80, 0x02]); b.i8(dx); b.i8(-dy); }
+    else if (f === 'E') break;
+  }
+  b.bytes([0x80, 0x10]);
+  return b.blob();
+}
+
+/* 5. UI */
+function embRefresh() { clearTimeout(EMB.timer); EMB.timer = setTimeout(embBuild, 120); }
+async function embBuild() {
+  const src = embSource();
+  if (!src) { EMB.stream = null; $('#embStat').innerHTML = 'Upload a design on the <b>Image → DTF</b> page first, or pick <b>GS Logo</b>.'; const x = $('#embCanvas').getContext('2d'); x.clearRect(0, 0, 1e4, 1e4); return; }
+  busy(true, 'Digitizing stitches…'); await tick();
+  try {
+    const spacing = +($('#embDensity .on').dataset.d), ang = +($('#embAngle .on').dataset.a);
+    const blocks = embDigitize(src, spacing, ang);
+    EMB.colors = blocks.map(b => b.color); EMB.stream = embStream(blocks); EMB.W = src.W; EMB.H = src.H; EMB.lastSrc = src;
+    embPreview();
+    if (EMB.view === 'hat') embHatRender();
+  } finally { busy(false); }
+}
+function embPreview() {
+  const cv = $('#embCanvas'), k = 1000 / EMB.W; cv.width = 1000; cv.height = Math.round(EMB.H * k);
+  const x = cv.getContext('2d'); x.clearRect(0, 0, cv.width, cv.height); x.lineCap = 'round'; x.lineJoin = 'round';
+  let ci = 0, px = 0, py = 0, n = 0, jumps = 0;
+  const col = c => `rgb(${c[0]},${c[1]},${c[2]})`, tr = (v, o) => (v + o / 2) * k;
+  x.lineWidth = Math.max(0.6, 3.5 * k); x.strokeStyle = col(EMB.colors[0]); x.beginPath();
+  for (const [sx, sy, f] of EMB.stream) {
+    if (f === 'S') { x.moveTo(tr(px, EMB.W), tr(py, EMB.H)); x.lineTo(tr(sx, EMB.W), tr(sy, EMB.H)); n++; }
+    else if (f === 'J') jumps++;
+    else if (f === 'C') { x.stroke(); ci++; x.strokeStyle = col(EMB.colors[ci]); x.beginPath(); }
+    px = sx; py = sy;
+  }
+  x.stroke();
+  const bd = embBounds(EMB.stream.filter(s => s[2] === 'S')), wmm = (bd[2] - bd[0]) / 10, hmm = (bd[3] - bd[1]) / 10;
+  const hoop = wmm <= 100 && hmm <= 100 ? '4×4" (100×100 mm)' : wmm <= 130 && hmm <= 180 ? '5×7" (130×180 mm)' : wmm <= 160 && hmm <= 260 ? '6×10" (160×260 mm)' : 'large/multi-needle hoop';
+  $('#embStat').innerHTML = `<b>${n.toLocaleString()}</b> stitches · <b>${EMB.colors.length}</b> color${EMB.colors.length > 1 ? 's' : ''} · ${jumps} jumps/trims<br>Size: <b>${wmm.toFixed(1)} × ${hmm.toFixed(1)} mm</b> (${(wmm / 25.4).toFixed(2)} × ${(hmm / 25.4).toFixed(2)}") · fits a ${hoop} hoop<br>Thread order: ` +
+    EMB.colors.map((c, i) => `<span style="white-space:nowrap"><span class="prev" style="display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;background:${col(c)};box-shadow:inset 0 0 0 1px rgba(0,0,0,.3)"></span> ${i + 1}. ${hx(c).toUpperCase()}</span>`).join(' &nbsp;');
+}
+function embName() { const base = EMB.src === 'gs' ? 'GS_Logo' : (S.name || 'design'); return `${base}_${(+$('#embW').value || 3.5)}in`; }
+$$('#embExport, .embt [data-fmt]').forEach(btn => btn.onclick = async () => {
+  if (!EMB.stream) { alert('Nothing to stitch yet.'); return; }
+  try {
+    const fmt = btn.dataset.fmt, name = embName();
+    const blob = fmt === 'dst' ? writeDST(EMB.stream, name) : fmt === 'pes' ? writePES(EMB.stream, EMB.colors, name) : writeJEF(EMB.stream, EMB.colors);
+    const fname = `${name}.${fmt.toUpperCase()}`.replace(/\.(DST|PES|JEF)$/, m => m.toLowerCase());
+    await gsSave(blob, fname);
+    $('#embDone').innerHTML = `Saved <b>${fname}</b>. Copy it to a USB stick or your machine's app, then sew a test first.`;
+  } catch (e) { alert(e.message || e); }
+});
+$('#embEmb').onclick = () => $('#embEmbNote').classList.toggle('hidden');
+$$('#embSrc button').forEach(btn => btn.onclick = () => {
+  EMB.src = btn.dataset.src; $$('#embSrc button').forEach(x => x.classList.toggle('on', x === btn));
+  $('#embSrcNote').innerHTML = EMB.src === 'gs' ? 'Uses the colors and style you picked on the <b>Vectorized GS Logo</b> page. Transparent parts aren\'t stitched.'
+    : 'Uses the image from the <b>Image → DTF</b> page (after your color fixes), simplified to its main solid colors (up to 8). Works best on clean logos.';
+  embRefresh();
+});
+for (const id of ['embDensity', 'embAngle']) $$(`#${id} button`).forEach(btn => btn.onclick = () => { $$(`#${id} button`).forEach(x => x.classList.toggle('on', x === btn)); embRefresh(); });
+$$('#embBg button').forEach(btn => btn.onclick = () => { $$('#embBg button').forEach(x => x.classList.toggle('on', x === btn)); $('#embStage').className = 'stage ' + btn.dataset.bg; });
+$('#embW').oninput = () => { $$('#embSizes button').forEach(x => x.classList.toggle('on', +x.dataset.w === +$('#embW').value)); embRefresh(); };
+$$('#embSizes button').forEach(btn => btn.onclick = () => { $('#embW').value = btn.dataset.w; $('#embW').oninput(); });
+/* ---------------- 3D puff preview on The Game GB998 cap ----------------
+   A drawn flat-bill cap (front view) in the 8 GS colourways, with the logo rendered as raised puff
+   embroidery: every colour area is domed (height from distance to its edge), lit from the top-left,
+   given thread texture and a soft shadow, then bent slightly around the crown. */
+const HATS = [
+  { name: 'Black · Columbia visor', front: '#1d1d20', side: '#1d1d20', visor: '#86B3DD' },
+  { name: 'Columbia · Navy visor', front: '#86B3DD', side: '#86B3DD', visor: '#1b2342' },
+  { name: 'Columbia', front: '#86B3DD', side: '#86B3DD', visor: '#86B3DD' },
+  { name: 'Navy', front: '#1b2342', side: '#1b2342', visor: '#1b2342' },
+  { name: 'Navy · Columbia visor', front: '#1b2342', side: '#1b2342', visor: '#86B3DD' },
+  { name: 'White · Navy', front: '#f3f3f1', side: '#1b2342', visor: '#1b2342' },
+  { name: 'White · Columbia visor', front: '#f3f3f1', side: '#f3f3f1', visor: '#86B3DD' },
+  { name: 'White · Navy · Columbia visor', front: '#f3f3f1', side: '#1b2342', visor: '#86B3DD' }
+];
+EMB.view = 'stitch'; EMB.hat = 1;
+function shadeHex(hex, f) { const c = hex2rgb(hex.toLowerCase()); return `rgb(${c.map(v => Math.max(0, Math.min(255, Math.round(f >= 0 ? v + (255 - v) * f : v * (1 + f))))).join(',')})`; }
+function hatPaths() { // 1000×820 canvas
+  const crown = new Path2D(); crown.moveTo(140, 612); crown.bezierCurveTo(132, 380, 270, 214, 500, 208); crown.bezierCurveTo(730, 214, 868, 380, 860, 612); crown.quadraticCurveTo(500, 646, 140, 612); crown.closePath();
+  const front = new Path2D(); front.moveTo(272, 626); front.bezierCurveTo(268, 430, 352, 248, 500, 210); front.bezierCurveTo(648, 248, 732, 430, 728, 626); front.quadraticCurveTo(500, 646, 272, 626); front.closePath();
+  const visor = new Path2D(); visor.moveTo(112, 604); visor.quadraticCurveTo(500, 636, 888, 604); visor.lineTo(910, 656); visor.quadraticCurveTo(500, 724, 90, 656); visor.closePath();
+  return { crown, front, visor };
+}
+function drawHat(x, hat, logo, opts = {}) {
+  const P = hatPaths();
+  x.save();
+  // shadow under the cap
+  x.fillStyle = 'rgba(0,0,0,.18)'; x.beginPath(); x.ellipse(500, 700, 430, 36, 0, 0, Math.PI * 2); x.filter = 'blur(14px)'; x.fill(); x.filter = 'none';
+  // crown: sides then front panels
+  x.fillStyle = hat.side; x.fill(P.crown);
+  x.save(); x.clip(P.crown); x.fillStyle = hat.front; x.fill(P.front);
+  // perforated side panels
+  x.save(); const sideOnly = new Path2D(); sideOnly.addPath(P.crown); x.clip(P.crown);
+  x.fillStyle = shadeHex(hat.side, hat.side === '#f3f3f1' ? -0.12 : 0.18);
+  for (let yy = 230; yy < 640; yy += 9) for (let xx = 140 + ((yy / 9) % 2) * 4.5; xx < 860; xx += 9) {
+    if (x.isPointInPath(P.front, xx, yy)) continue; x.beginPath(); x.arc(xx, yy, 1.4, 0, Math.PI * 2); x.fill(); }
+  x.restore();
+  // seams
+  x.strokeStyle = shadeHex(hat.front, -0.25); x.lineWidth = 2.2; x.setLineDash([]);
+  x.beginPath(); x.moveTo(500, 212); x.lineTo(500, 630); x.stroke();
+  x.strokeStyle = shadeHex(hat.side, -0.3); x.stroke(P.front);
+  x.setLineDash([5, 4]); x.lineWidth = 1.2; x.strokeStyle = shadeHex(hat.front, hat.front === '#f3f3f1' ? -0.3 : 0.25);
+  x.beginPath(); x.moveTo(492, 222); x.lineTo(492, 628); x.moveTo(508, 222); x.lineTo(508, 628); x.stroke(); x.setLineDash([]);
+  // the logo, bent around the crown
+  if (logo) {
+    const { img, wIn } = logo, pxIn = 92, dw = wIn * pxIn, dh = dw * img.height / img.width, cx = 500, cy = 425 - Math.max(0, dh - 230) * 0.2, hw = 300;
+    // soft shadow
+    x.save(); x.globalAlpha = 0.45; x.filter = 'blur(5px) brightness(0)';
+    for (let i = 0; i < img.width; i += 2) { const fx = (i / img.width - 0.5) * dw, t = fx / hw, nx = cx + fx * (1 - 0.06 * t * t), ny = cy - dh / 2 + 18 * t * t;
+      x.drawImage(img, i, 0, 2, img.height, nx + 3, ny + 6, 2 * dw / img.width + 0.6, dh); }
+    x.restore();
+    for (let i = 0; i < img.width; i += 2) { const fx = (i / img.width - 0.5) * dw, t = fx / hw, nx = cx + fx * (1 - 0.06 * t * t), ny = cy - dh / 2 + 18 * t * t;
+      x.drawImage(img, i, 0, 2, img.height, nx, ny, 2 * dw / img.width + 0.6, dh); }
+  }
+  // roundness of the crown
+  const g = x.createRadialGradient(430, 330, 40, 500, 470, 470);
+  g.addColorStop(0, 'rgba(255,255,255,.14)'); g.addColorStop(0.6, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(0,0,0,.34)');
+  x.fillStyle = g; x.fill(P.crown);
+  x.restore(); // crown clip
+  // eyelets + button
+  for (const [ex, ey] of [[338, 330], [662, 330]]) { x.fillStyle = shadeHex(hat.side, -0.45); x.beginPath(); x.arc(ex, ey, 6, 0, Math.PI * 2); x.fill(); x.strokeStyle = shadeHex(hat.side, 0.25); x.lineWidth = 1.5; x.stroke(); }
+  x.fillStyle = shadeHex(hat.side, 0.05); x.beginPath(); x.ellipse(500, 208, 22, 9, 0, 0, Math.PI * 2); x.fill(); x.strokeStyle = shadeHex(hat.side, -0.35); x.lineWidth = 1.5; x.stroke();
+  // visor (flat bill) with stitch rows
+  x.fillStyle = hat.visor; x.fill(P.visor);
+  x.save(); x.clip(P.visor);
+  const vg = x.createLinearGradient(0, 600, 0, 700); vg.addColorStop(0, 'rgba(255,255,255,.12)'); vg.addColorStop(1, 'rgba(0,0,0,.28)'); x.fillStyle = vg; x.fill(P.visor);
+  x.strokeStyle = shadeHex(hat.visor, hat.visor === '#1b2342' ? 0.3 : -0.25); x.lineWidth = 1.1; x.setLineDash([5, 4]);
+  for (let k = 0; k < 6; k++) { x.beginPath(); x.moveTo(112 - k * 3, 614 + k * 7); x.quadraticCurveTo(500, 650 + k * 10, 888 + k * 3, 614 + k * 7); x.stroke(); }
+  x.setLineDash([]); x.restore();
+  x.strokeStyle = 'rgba(0,0,0,.25)'; x.lineWidth = 1.5; x.stroke(P.visor); x.stroke(P.crown);
+  x.restore();
+}
+/* puff render of the design: domed colour areas with light, thread texture and edge grooves */
+function puffImage(src) {
+  const sc = Math.max(1, Math.round(src.W / 520)), W = Math.ceil(src.W / sc), H = Math.ceil(src.H / sc), N = W * H, lab = new Uint8Array(N);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) lab[y * W + x] = src.lab[Math.min(src.H - 1, y * sc) * src.W + Math.min(src.W - 1, x * sc)];
+  const d = new Float32Array(N); for (let p = 0; p < N; p++) d[p] = 1e9;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x, l = lab[p]; if (!l) { d[p] = 0; continue; }
+    if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || lab[p - 1] !== l || lab[p + 1] !== l || lab[p - W] !== l || lab[p + W] !== l) d[p] = 1; }
+  chamfer34(d, W, H);
+  const R = Math.max(4, W * 0.018) * 3, hgt = new Float32Array(N);
+  for (let p = 0; p < N; p++) { if (!lab[p]) continue; const t = Math.min(1, d[p] / R); hgt[p] = Math.sqrt(1 - (1 - t) * (1 - t)); }
+  const c = mk(W, H), cx = c.getContext('2d'), id = cx.createImageData(W, H), o = id.data;
+  const L = [-0.55, -0.65, 0.52], ln = Math.hypot(...L); L[0] /= ln; L[1] /= ln; L[2] /= ln;
+  const ang = (+($('#embAngle .on').dataset.a) || 45) * Math.PI / 180, ca = Math.cos(ang), sa = Math.sin(ang);
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+    const p = y * W + x, l = lab[p]; if (!l) continue;
+    const gx = (hgt[p + 1] - hgt[p - 1]) * 6, gy = (hgt[p + W] - hgt[p - W]) * 6, nl = Math.hypot(gx, gy, 1);
+    const nx = -gx / nl, ny = -gy / nl, nz = 1 / nl, dif = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+    const spec = Math.pow(Math.max(0, nz * 0.8 + dif * 0.2), 30) * 0.18;
+    const thread = 0.94 + 0.06 * Math.sin((-x * sa + y * ca) * 2.2) + 0.03 * Math.sin((x * ca + y * sa) * 0.9);
+    const lit = Math.min(1.12, 0.3 + 0.72 * dif / L[2]) * thread, col = src.colors[l - 1], i = p * 4;
+    for (let k = 0; k < 3; k++) o[i + k] = Math.max(0, Math.min(255, col[k] * lit + 255 * spec));
+    o[i + 3] = 255;
+  }
+  cx.putImageData(id, 0, 0);
+  return c;
+}
+function embHatRender() {
+  const cv = $('#embCanvas'); cv.width = 1000; cv.height = 820;
+  const x = cv.getContext('2d'); x.clearRect(0, 0, 1000, 820);
+  const src = EMB.lastSrc; let logo = null;
+  if (src) logo = { img: puffImage(src), wIn: +$('#embW').value || 3.5 };
+  drawHat(x, HATS[EMB.hat], logo);
+  const w = +$('#embW').value || 3.5;
+  $('#embHatNote').innerHTML = (w > 4.5 ? '<b style="color:#c0262d">Most caps take up to about 4.5" wide on the front — try the Hat size.</b><br>' : '') +
+    'Preview of 3D puff on The Game GB998 Perforated GameChanger. Real puff is sewn with satin columns over foam; these exported files use flat fill, so ask your embroiderer to digitize for puff (or use the files as-is for flat embroidery).';
+}
+function embHatChips() {
+  const box = $('#embHats'); box.innerHTML = '';
+  HATS.forEach((h, i) => {
+    const b = document.createElement('button'); b.className = 'hatchip' + (i === EMB.hat ? ' on' : ''); b.title = h.name;
+    const c = mk(140, 115), x = c.getContext('2d'); x.scale(0.14, 0.14); drawHat(x, h, null); c.className = 'hatimg';
+    b.appendChild(c); const s = document.createElement('span'); s.textContent = h.name; b.appendChild(s);
+    b.onclick = () => { EMB.hat = i; $$('#embHats .hatchip').forEach((el, j) => el.classList.toggle('on', j === i)); embHatRender(); };
+    box.appendChild(b);
+  });
+}
+$$('#embView button').forEach(btn => btn.onclick = () => {
+  EMB.view = btn.dataset.v; $$('#embView button').forEach(x => x.classList.toggle('on', x === btn));
+  $('#embHatBox').classList.toggle('hidden', EMB.view !== 'hat'); $('#embBg').classList.toggle('hidden', EMB.view === 'hat');
+  $('#embStage').className = 'stage ' + (EMB.view === 'hat' ? 'white' : ($('#embBg .on').dataset.bg));
+  if (EMB.view === 'hat') { embHatChips(); embHatRender(); } else if (EMB.stream) embPreview();
+});
+
+window.__emb = { EMB, embHatRender, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
+
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
 
