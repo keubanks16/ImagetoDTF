@@ -264,21 +264,24 @@
     </div>
     <div>
       <div class="card">
-        <h2>Colors</h2>
-        <div class="chips" id="gsPresets" style="margin-bottom:6px">
-          <button data-p="#559BCB,#192649,#FFFFFF">Columbia · Navy · White</button>
-          <button data-p="#192649,#559BCB,#FFFFFF">Navy · Columbia · White</button>
-          <button data-p="#FFFFFF,#192649,#559BCB">White · Navy · Columbia</button>
-          <button data-p="#F5091E,#192649,#FFFFFF">Red · Navy · White</button>
+        <h2>Style</h2>
+        <div class="seg" id="gsStyle" style="margin-bottom:6px">
+          <button data-s="3" class="on">3 colors (2 borders)</button>
+          <button data-s="2">2 colors (1 border)</button>
         </div>
+        <p class="hint" id="gsStyleNote" style="margin:4px 0 12px"></p>
+        <h2>Colors</h2>
+        <div class="chips" id="gsPresets" style="margin-bottom:6px"></div>
         <div id="gsParts"></div>
       </div>
       <div class="card">
         <h2>Outline widths</h2>
-        <label class="f">Outer border <small id="gsWoV">15</small></label>
+        <div id="gsW3"><label class="f">Outer border <small id="gsWoV">15</small></label>
         <input type="range" id="gsWo" min="0" max="30" value="15">
         <label class="f">Inner border <small id="gsWiV">13</small></label>
-        <input type="range" id="gsWi" min="0" max="30" value="13">
+        <input type="range" id="gsWi" min="0" max="30" value="13"></div>
+        <div id="gsW2" class="hidden"><label class="f">Border <small id="gsWbV">25</small></label>
+        <input type="range" id="gsWb" min="0" max="45" value="25"></div>
       </div>
       <div class="card">
         <h2>Print size</h2>
@@ -1527,12 +1530,47 @@ function gsBuildUI() {
     col.oninput = () => { st.c = col.value.toUpperCase(); st.clear = false; sync(); gsRender(); };
     hex.oninput = () => { let v = hex.value.trim(); if (!v.startsWith('#')) v = '#' + v;
       if (/^#[0-9a-f]{6}$/i.test(v)) { st.c = v.toUpperCase(); st.clear = false; sync(); gsRender(); } };
-    cb.onchange = () => { st.clear = cb.checked; sync(); gsRender(); };
-    part.sync = sync; sync(); box.appendChild(row);
+    cb.onchange = () => {
+      if (part.key === 'outer' && cb.checked && gsStyle === 3) { // no outer border → the 2-colour logo
+        cb.checked = false; setGsStyle(2, 'Outer border set to transparent, so this switched to the 2-color logo (one border).'); return; }
+      st.clear = cb.checked; sync(); gsRender(); };
+    part.row = row; part.sync = sync; sync(); box.appendChild(row);
   }
+}
+let gsStyle = 3;
+const GS_PRESETS = {
+  3: [['#559BCB,#192649,#FFFFFF', 'Columbia · Navy · White'], ['#192649,#559BCB,#FFFFFF', 'Navy · Columbia · White'], ['#FFFFFF,#192649,#559BCB', 'White · Navy · Columbia'], ['#F5091E,#192649,#FFFFFF', 'Red · Navy · White']],
+  2: [[',#192649,#FFFFFF', 'Navy · White'], [',#559BCB,#FFFFFF', 'Columbia · White'], [',#192649,#559BCB', 'Navy · Columbia'], [',#FFFFFF,#192649', 'White · Navy']]
+};
+function setGsStyle(n, note) {
+  gsStyle = n;
+  $$('#gsStyle button').forEach(b => b.classList.toggle('on', +b.dataset.s === n));
+  const outer = GS_PARTS[0], inner = GS_PARTS[1];
+  outer.row.classList.toggle('hidden', n === 2);
+  inner.row.querySelector('.top span').lastChild.textContent = n === 2 ? 'Border' : 'Inner border';
+  inner.row.querySelector('.tr').classList.toggle('hidden', n === 2);
+  if (n === 2) { gsState.inner.clear = false; inner.sync(); }
+  $('#gsW3').classList.toggle('hidden', n === 2); $('#gsW2').classList.toggle('hidden', n === 3);
+  $('#gsStyleNote').textContent = note || (n === 2 ? 'One border around white letters — the clean two-color GS.' : 'Outer border + inner border + letters.');
+  $('#gsPresets').innerHTML = GS_PRESETS[n].map(([p, l]) => `<button data-p="${p}">${l}</button>`).join('');
+  $$('#gsPresets button').forEach(btn => btn.onclick = () => {
+    const [o, i, f] = btn.dataset.p.split(',');
+    if (o) Object.assign(gsState.outer, { c: o, clear: false });
+    Object.assign(gsState.inner, { c: i, clear: false }); Object.assign(gsState.face, { c: f, clear: false });
+    GS_PARTS.forEach(p => p.sync()); gsRender();
+  });
+  gsRender();
 }
 function gsOps() { // drawing steps: [shape, colour or null (= cut out), stroke width]
   const wo = +$('#gsWo').value, wi = +$('#gsWi').value, ops = [];
+  if (gsStyle === 2) { // two-colour: one border around the letters
+    const wb = +$('#gsWb').value;
+    for (const pts of GS_SHAPES) {
+      ops.push([pts, gsState.inner.c, 2 * wb]);
+      ops.push([pts, gsState.face.clear ? null : gsState.face.c, 0]);
+    }
+    return ops;
+  }
   for (const pts of GS_SHAPES) {
     ops.push([pts, gsState.outer.clear ? null : gsState.outer.c, 2 * (wo + wi)]);
     ops.push([pts, gsState.inner.clear ? null : gsState.inner.c, 2 * wi]);
@@ -1571,7 +1609,8 @@ function gsRender() {
 }
 function gsName(ext) {
   const n = p => gsState[p].clear ? 'Clear' : gsState[p].c.replace('#', '');
-  return `GS_Logo_${n('outer')}-${n('inner')}-${n('face')}_${+$('#gsW').value || 10}in.${ext}`;
+  const cols = gsStyle === 2 ? `2color_${n('inner')}-${n('face')}` : `${n('outer')}-${n('inner')}-${n('face')}`;
+  return `GS_Logo_${cols}_${+$('#gsW').value || 10}in.${ext}`;
 }
 async function gsSave(blob, fname) {
   if (NATIVE) { await nativeSave(blob, fname); return; }
@@ -1605,11 +1644,8 @@ $('#gsSvg').onclick = async () => {
     $('#gsDone').innerHTML = `Saved <b>${fname}</b> — vector file, sharp at any size.`;
   } catch (e) { alert(e.message || e); }
 };
-$$('#gsPresets button').forEach(btn => btn.onclick = () => {
-  const [o, i, f] = btn.dataset.p.split(',');
-  Object.assign(gsState.outer, { c: o, clear: false }); Object.assign(gsState.inner, { c: i, clear: false }); Object.assign(gsState.face, { c: f, clear: false });
-  GS_PARTS.forEach(p => p.sync()); gsRender();
-});
+$$('#gsStyle button').forEach(btn => btn.onclick = () => setGsStyle(+btn.dataset.s));
+$('#gsWb').oninput = e => { $('#gsWbV').textContent = e.target.value; gsRender(); };
 $$('#gsBg button').forEach(btn => btn.onclick = () => { $$('#gsBg button').forEach(x => x.classList.toggle('on', x === btn)); $('#gsStage').className = 'stage ' + btn.dataset.bg; });
 $('#gsWo').oninput = e => { $('#gsWoV').textContent = e.target.value; gsRender(); };
 $('#gsWi').oninput = e => { $('#gsWiV').textContent = e.target.value; gsRender(); };
@@ -1621,7 +1657,7 @@ $$('#appTabs button').forEach(btn => btn.onclick = () => {
   $('#gsMain').classList.toggle('hidden', btn.dataset.tab !== 'gs');
   if (btn.dataset.tab === 'gs') gsRender();
 });
-gsBuildUI();
+gsBuildUI(); setGsStyle(3);
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
 
