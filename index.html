@@ -212,8 +212,8 @@
         <label class="f">Color boost <small id="satV">10%</small></label>
         <input type="range" id="sat" min="0" max="50" value="10">
         <div class="toggle"><div>Clean logo edges<small>Redraws every edge smooth and straight using the logo's exact colors. Best for solid-color logos and text — turn off for photos or shaded art.</small></div><input type="checkbox" id="logoMode"></div>
-        <div id="logoOpts"><label class="f">Edge smoothing <small id="smoothV">8</small></label>
-        <input type="range" id="smooth" min="1" max="12" value="8"></div>
+        <div id="logoOpts"><label class="f">Edge smoothing <small id="smoothV">4</small></label>
+        <input type="range" id="smooth" min="1" max="12" value="4"></div>
         <div class="toggle"><div>Solid edges (recommended)<small>No see-through pixels — prevents fuzzy or ghosted DTF edges</small></div><input type="checkbox" id="hard" checked></div>
         <div class="stat" id="stat">—</div>
       </div>
@@ -743,10 +743,9 @@ function render() {
   if (!$('#logoMode').checked) { vx.putImageData(out, 0, 0); return; }
   // preview the cleaned edges (at screen-friendly size so it stays quick)
   const seq = ++renderSeq, k = Math.min(1, 1400 / Math.max(S.W, S.H)), pw = Math.round(S.W * k), ph = Math.round(S.H * k);
-  smoothLogo(out, pw, ph, logoColors(out), +$('#smooth').value * 0.5 * k).then(sm => {
+  vectorLogo(out, S.W, S.H, logoColors(out), +$('#smooth').value).then(sm => {
     if (seq !== renderSeq) return;
-    const c = mk(pw, ph); c.getContext('2d').putImageData(sm, 0, 0);
-    vx.clearRect(0, 0, S.W, S.H); vx.imageSmoothingQuality = 'high'; vx.drawImage(c, 0, 0, S.W, S.H);
+    vx.putImageData(sm, 0, 0);
   });
 }
 function updateStat() {
@@ -1098,50 +1097,140 @@ function logoFit(id, cols) { // share of solid pixels that are close to one of t
     for (const c of cols) if (Math.abs(d[i] - c[0]) + Math.abs(d[i + 1] - c[1]) + Math.abs(d[i + 2] - c[2]) < 90) { ok++; break; } }
   return tot ? ok / tot : 0;
 }
-async function smoothLogo(src, tw, th, cols, rad) {
-  const W = src.width, H = src.height, sd = src.data, N = W * H, L = cols.length + 1; // label 0 = transparent
-  const lab = new Uint8Array(N), wgt = new Uint8Array(N);
+/* Vector clean-up: each colour region is traced into outlines, wobbles are straightened
+   (Douglas-Peucker), and the shapes are redrawn crisp at the output size. Colours are drawn as
+   stacked layers (outermost first, each layer = itself + everything drawn after it) so neighbouring
+   colours can never leave a gap between them. */
+function blurBox(a, W, H, r) { // two box-blur passes, in place on a Float32Array
+  const t = new Float32Array(W * H), k = 2 * r + 1;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < H; y++) { const o = y * W; let acc = 0;
+      for (let x = -r; x <= r; x++) acc += a[o + Math.min(W - 1, Math.max(0, x))];
+      for (let x = 0; x < W; x++) { t[o + x] = acc / k; acc += a[o + Math.min(W - 1, x + r + 1)] - a[o + Math.max(0, x - r)]; } }
+    for (let x = 0; x < W; x++) { let acc = 0;
+      for (let y = -r; y <= r; y++) acc += t[Math.min(H - 1, Math.max(0, y)) * W + x];
+      for (let y = 0; y < H; y++) { a[y * W + x] = acc / k; acc += t[Math.min(H - 1, y + r + 1) * W + x] - t[Math.max(0, y - r) * W + x]; } }
+  }
+}
+function traceLoops(inside, W, H) {
+  // pixel-edge contour following; inside is always on the right of the direction of travel
+  const ex = [], ey = [], dx = [], dy = [], out = new Map();
+  const add = (x, y, ddx, ddy) => { const i = ex.length; ex.push(x); ey.push(y); dx.push(ddx); dy.push(ddy);
+    const v = y * (W + 1) + x; const l = out.get(v); if (l) l.push(i); else out.set(v, [i]); };
+  const IN = (x, y) => x >= 0 && y >= 0 && x < W && y < H && inside[y * W + x];
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!inside[y * W + x]) continue;
+    if (!IN(x, y - 1)) add(x, y, 1, 0);
+    if (!IN(x + 1, y)) add(x + 1, y, 0, 1);
+    if (!IN(x, y + 1)) add(x + 1, y + 1, -1, 0);
+    if (!IN(x - 1, y)) add(x, y + 1, 0, -1);
+  }
+  const used = new Uint8Array(ex.length), loops = [];
+  for (let e0 = 0; e0 < ex.length; e0++) {
+    if (used[e0]) continue;
+    const pts = []; let e = e0;
+    while (e >= 0 && !used[e]) {
+      used[e] = 1;
+      const nx = ex[e] + dx[e], ny = ey[e] + dy[e];
+      if (!pts.length || (pts.length >= 2 && false)) {}
+      pts.push(ex[e], ey[e]);
+      const cand = out.get(ny * (W + 1) + nx); let best = -1, bc = -9;
+      if (cand) for (const c of cand) if (!used[c]) { const cr = dx[e] * dy[c] - dy[e] * dx[c]; if (cr > bc) { bc = cr; best = c; } }
+      e = best;
+    }
+    // keep corners only
+    const n = pts.length / 2, cx = [], cy = [];
+    for (let i = 0; i < n; i++) {
+      const px = pts[((i + n - 1) % n) * 2], py = pts[((i + n - 1) % n) * 2 + 1], x = pts[i * 2], y = pts[i * 2 + 1], qx = pts[((i + 1) % n) * 2], qy = pts[((i + 1) % n) * 2 + 1];
+      if ((x - px) * (qy - y) - (y - py) * (qx - x) !== 0) { cx.push(x); cy.push(y); }
+    }
+    if (cx.length >= 3) loops.push([cx, cy]);
+  }
+  return loops;
+}
+function simplifyLoop([xs, ys], eps) {
+  const n = xs.length; if (n < 4) return [xs, ys];
+  let far = 0, fd = -1; for (let i = 1; i < n; i++) { const d = (xs[i] - xs[0]) ** 2 + (ys[i] - ys[0]) ** 2; if (d > fd) { fd = d; far = i; } }
+  const keep = new Uint8Array(n); keep[0] = keep[far] = 1;
+  const stack = [[0, far], [far, n]], e2 = eps * eps;
+  while (stack.length) {
+    const [a, b] = stack.pop(); const bi = b % n, ax = xs[a], ay = ys[a], bx = xs[bi], by = ys[bi];
+    const L = Math.hypot(bx - ax, by - ay) || 1e-9; let m = -1, md = -1;
+    for (let i = a + 1; i < b; i++) { const d = Math.abs((bx - ax) * (ay - ys[i]) - (ax - xs[i]) * (by - ay)) / L; if (d > md) { md = d; m = i; } }
+    if (md * md > e2 && m > 0) { keep[m] = 1; stack.push([a, m], [m, b]); }
+  }
+  const idx = []; for (let i = 0; i < n; i++) if (keep[i]) idx.push(i);
+  const K = idx.length; if (K < 3) return [idx.map(i => xs[i]), idx.map(i => ys[i])];
+  // fit an exact straight line to every run of points, then put each corner where its two lines meet
+  const lines = [];
+  for (let k = 0; k < K; k++) {
+    const i0 = idx[k], i1 = k + 1 < K ? idx[k + 1] : idx[0] + n;
+    let sx = 0, sy = 0, c = 0;
+    for (let i = i0; i <= i1; i++) { sx += xs[i % n]; sy += ys[i % n]; c++; }
+    const mx = sx / c, my = sy / c; let sxx = 0, syy = 0, sxy = 0;
+    for (let i = i0; i <= i1; i++) { const u = xs[i % n] - mx, v = ys[i % n] - my; sxx += u * u; syy += v * v; sxy += u * v; }
+    const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    lines.push([mx, my, Math.cos(ang), Math.sin(ang)]);
+  }
+  const ox = [], oy = [];
+  for (let k = 0; k < K; k++) {
+    const A = lines[(k + K - 1) % K], B = lines[k], vx = xs[idx[k]], vy = ys[idx[k]];
+    const den = A[2] * B[3] - A[3] * B[2];
+    let px = vx, py = vy;
+    if (Math.abs(den) > 0.17) { // lines meet at a real corner (> ~10°)
+      const t = ((B[0] - A[0]) * B[3] - (B[1] - A[1]) * B[2]) / den;
+      const ix = A[0] + A[2] * t, iy = A[1] + A[3] * t;
+      if (Math.hypot(ix - vx, iy - vy) < eps * 3) { px = ix; py = iy; }
+    } else { // nearly straight: project onto the line
+      const t = (vx - B[0]) * B[2] + (vy - B[1]) * B[3]; px = B[0] + B[2] * t; py = B[1] + B[3] * t;
+    }
+    ox.push(px); oy.push(py);
+  }
+  return [ox, oy];
+}
+function polyArea([xs, ys]) { let a = 0; for (let i = 0, n = xs.length; i < n; i++) { const j = (i + 1) % n; a += xs[i] * ys[j] - xs[j] * ys[i]; } return Math.abs(a / 2); }
+
+async function vectorLogo(src, tw, th, cols, level) {
+  const W = src.width, H = src.height, sd = src.data, N = W * H, K = cols.length + 1;
+  // 1. clean label map: snap to colours, then a light majority vote to remove specks/fuzz
+  const sz = Math.max(1, Math.max(W, H) / 1000), r = Math.max(1, Math.round(level * 0.2 * sz)), eps = (0.4 + level * 0.2) * sz;
+  const best = new Float32Array(N).fill(-1), lab = new Uint8Array(N), m = new Float32Array(N);
+  const raw = new Uint8Array(N);
   for (let p = 0; p < N; p++) { const i = p * 4;
-    if (sd[i + 3] < 16) { lab[p] = 0; wgt[p] = 255; continue; }
+    if (sd[i + 3] < 128) { raw[p] = 0; continue; }
     let b = 0, bd = 1e9;
     for (let k = 0; k < cols.length; k++) { const c = cols[k], dd = (sd[i] - c[0]) ** 2 + (sd[i + 1] - c[1]) ** 2 + (sd[i + 2] - c[2]) ** 2; if (dd < bd) { bd = dd; b = k; } }
-    lab[p] = b + 1; wgt[p] = sd[i + 3]; }
-  const TN = tw * th, best = new Uint8Array(TN), sec = new Uint8Array(TN), bl = new Uint8Array(TN), sl = new Uint8Array(TN);
-  const mc = mk(W, H), mx = mc.getContext('2d'), m = new ImageData(W, H), md = m.data;
-  const tc = mk(tw, th), tx = tc.getContext('2d', { willReadFrequently: true });
-  tx.imageSmoothingEnabled = true; tx.imageSmoothingQuality = 'high';
-  const tmp = new Uint16Array(TN), buf = new Uint8Array(TN);
-  const r = Math.max(1, Math.round(rad));
-  const boxH = (a, out) => { for (let y = 0; y < th; y++) { const o = y * tw; let acc = 0;
-      for (let x = -r; x <= r; x++) acc += a[o + Math.min(tw - 1, Math.max(0, x))];
-      for (let x = 0; x < tw; x++) { out[o + x] = acc / (2 * r + 1);
-        acc += a[o + Math.min(tw - 1, x + r + 1)] - a[o + Math.max(0, x - r)]; } } };
-  const boxV = (a, out) => { for (let x = 0; x < tw; x++) { let acc = 0;
-      for (let y = -r; y <= r; y++) acc += a[Math.min(th - 1, Math.max(0, y)) * tw + x];
-      for (let y = 0; y < th; y++) { out[y * tw + x] = acc / (2 * r + 1);
-        acc += a[Math.min(th - 1, y + r + 1) * tw + x] - a[Math.max(0, y - r) * tw + x]; } } };
-  for (let L0 = 0; L0 < L; L0++) {
-    for (let p = 0; p < N; p++) { const v = lab[p] === L0 ? wgt[p] : (L0 === 0 ? 255 - wgt[p] : 0); md[p * 4] = md[p * 4 + 1] = md[p * 4 + 2] = 255; md[p * 4 + 3] = v; }
-    mx.putImageData(m, 0, 0);
-    tx.clearRect(0, 0, tw, th); tx.drawImage(mc, 0, 0, tw, th);
-    const td = tx.getImageData(0, 0, tw, th).data;
-    for (let q = 0; q < TN; q++) buf[q] = td[q * 4 + 3];
-    boxH(buf, tmp); boxV(tmp, buf); boxH(buf, tmp); boxV(tmp, buf); // two box passes ≈ smooth blur
-    for (let q = 0; q < TN; q++) { const v = buf[q];
-      if (v > best[q]) { sec[q] = best[q]; sl[q] = bl[q]; best[q] = v; bl[q] = L0; }
-      else if (v > sec[q]) { sec[q] = v; sl[q] = L0; } }
+    raw[p] = b + 1; }
+  for (let k = 0; k < K; k++) {
+    for (let p = 0; p < N; p++) m[p] = raw[p] === k ? 1 : 0;
+    blurBox(m, W, H, r);
+    for (let p = 0; p < N; p++) if (m[p] > best[p]) { best[p] = m[p]; lab[p] = k; }
     await tick();
   }
-  const out = new ImageData(tw, th), od = out.data, slope = 255 / (2 * r + 1);
-  for (let q = 0; q < TN; q++) {
-    const t = Math.min(1, 0.5 + 0.5 * (best[q] - sec[q]) / slope), i = q * 4, b = bl[q], c2 = sl[q];
-    const cb = b ? cols[b - 1] : null, cs = c2 ? cols[c2 - 1] : null;
-    if (!cb && !cs) { od[i + 3] = 0; continue; }
-    if (!cb) { od[i] = cs[0]; od[i + 1] = cs[1]; od[i + 2] = cs[2]; od[i + 3] = Math.round((1 - t) * 255); continue; }
-    if (!cs || sec[q] === 0) { od[i] = cb[0]; od[i + 1] = cb[1]; od[i + 2] = cb[2]; od[i + 3] = c2 === 0 && sec[q] ? Math.round(t * 255) : 255; continue; }
-    od[i] = cb[0] * t + cs[0] * (1 - t); od[i + 1] = cb[1] * t + cs[1] * (1 - t); od[i + 2] = cb[2] * t + cs[2] * (1 - t); od[i + 3] = 255;
+  // 2. layer order: colours nearest the outside first
+  const dist = new Float32Array(N); for (let p = 0; p < N; p++) dist[p] = lab[p] === 0 ? 0 : 1e9;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; let v = dist[p];
+    if (x > 0) v = Math.min(v, dist[p - 1] + 1); if (y > 0) v = Math.min(v, dist[p - W] + 1); dist[p] = v; }
+  for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const p = y * W + x; let v = dist[p];
+    if (x < W - 1) v = Math.min(v, dist[p + 1] + 1); if (y < H - 1) v = Math.min(v, dist[p + W] + 1); dist[p] = v; }
+  const sum = new Float64Array(K), cnt = new Float64Array(K);
+  for (let p = 0; p < N; p++) { sum[lab[p]] += Math.min(dist[p], 1e6); cnt[lab[p]]++; }
+  const order = [...Array(cols.length).keys()].map(k => k + 1).filter(k => cnt[k] > 0).sort((a, b) => sum[a] / cnt[a] - sum[b] / cnt[b]);
+  // 3. trace + straighten + draw each stacked layer
+  const out = mk(tw, th), ox = out.getContext('2d', { willReadFrequently: true }), sc = tw / W;
+  const rank = new Int16Array(K).fill(-1); order.forEach((k, i) => rank[k] = i);
+  const inside = new Uint8Array(N);
+  for (let li = 0; li < order.length; li++) {
+    for (let p = 0; p < N; p++) inside[p] = lab[p] && rank[lab[p]] >= li ? 1 : 0;
+    const loops = traceLoops(inside, W, H).map(l => simplifyLoop(l, eps)).filter(l => l[0].length >= 3 && polyArea(l) >= 6);
+    const c = cols[order[li] - 1];
+    ox.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; ox.beginPath();
+    for (const [xs, ys] of loops) { ox.moveTo(xs[0] * sc, ys[0] * sc); for (let i = 1; i < xs.length; i++) ox.lineTo(xs[i] * sc, ys[i] * sc); ox.closePath(); }
+    ox.fill('evenodd');
+    if (li > 0) { ox.strokeStyle = ox.fillStyle; ox.lineWidth = Math.max(1, sc * 0.9); ox.lineJoin = 'miter'; ox.stroke(); } // seal hairline seams
+    await tick();
   }
-  return out;
+  return ox.getImageData(0, 0, tw, th);
 }
 
 async function buildPNG() {
@@ -1152,7 +1241,7 @@ async function buildPNG() {
   let id;
   if ($('#logoMode').checked) {
     const srcID = saturate(copyID(S.work), +$('#sat').value / 100);
-    id = await smoothLogo(srcID, tw, th, logoColors(srcID), +$('#smooth').value * 0.5 * Math.max(1, tw / S.W));
+    id = await vectorLogo(srcID, tw, th, logoColors(srcID), +$('#smooth').value);
   } else {
   let src = mk(S.W, S.H);
   src.getContext('2d').putImageData(saturate(copyID(S.work), +$('#sat').value / 100), 0, 0);
