@@ -212,7 +212,8 @@
         <label class="f">Color boost <small id="satV">10%</small></label>
         <input type="range" id="sat" min="0" max="50" value="10">
         <div class="toggle"><div>Clean logo edges<small>Redraws every edge smooth and straight using the logo's exact colors. Best for solid-color logos and text — turn off for photos or shaded art.</small></div><input type="checkbox" id="logoMode"></div>
-        <div id="logoOpts"><label class="f">Edge smoothing <small id="smoothV">4</small></label>
+        <div id="logoOpts"><div class="toggle"><div>Even outline widths<small>Rebuilds the outlines around the letters at one exact width with sharp corners</small></div><input type="checkbox" id="evenOutlines" checked></div>
+        <label class="f">Edge smoothing <small id="smoothV">4</small></label>
         <input type="range" id="smooth" min="1" max="12" value="4"></div>
         <div class="toggle"><div>Solid edges (recommended)<small>No see-through pixels — prevents fuzzy or ghosted DTF edges</small></div><input type="checkbox" id="hard" checked></div>
         <div class="stat" id="stat">—</div>
@@ -1059,6 +1060,7 @@ $('#svgBtn').onclick = async () => {
     $('#done').innerHTML = `Saved <b>${fname}</b> — vector file, scales to any size with perfectly sharp edges.`;
   } catch (err) { alert(err.message || err); } finally { busy(false); }
 };
+$('#evenOutlines').onchange = () => render();
 let smoothTimer; $('#smooth').oninput = e => { $('#smoothV').textContent = e.target.value; clearTimeout(smoothTimer); smoothTimer = setTimeout(render, 200); };
 $('#printW').oninput = () => { $$('#sizeChips button').forEach(x => x.classList.toggle('on', +x.dataset.w === +$('#printW').value)); updateStat(); };
 $$('#sizeChips button').forEach(b => b.onclick = () => { $('#printW').value = b.dataset.w; $('#printW').oninput(); });
@@ -1204,6 +1206,84 @@ function simplifyLoop([xs, ys], eps) {
 }
 function polyArea([xs, ys]) { let a = 0; for (let i = 0, n = xs.length; i < n; i++) { const j = (i + 1) % n; a += xs[i] * ys[j] - xs[j] * ys[i]; } return Math.abs(a / 2); }
 
+function chamfer34(a, W, H) {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; let v = a[p];
+    if (x > 0) v = Math.min(v, a[p - 1] + 3);
+    if (y > 0) { v = Math.min(v, a[p - W] + 3); if (x > 0) v = Math.min(v, a[p - W - 1] + 4); if (x < W - 1) v = Math.min(v, a[p - W + 1] + 4); }
+    a[p] = v; }
+  for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--) { const p = y * W + x; let v = a[p];
+    if (x < W - 1) v = Math.min(v, a[p + 1] + 3);
+    if (y < H - 1) { v = Math.min(v, a[p + W] + 3); if (x < W - 1) v = Math.min(v, a[p + W + 1] + 4); if (x > 0) v = Math.min(v, a[p + W - 1] + 4); }
+    a[p] = v; }
+}
+/* Even outlines: when the logo is "letters + one or more outlines around them", trace only the
+   letter shapes and rebuild every outline as an exact, even-width offset with sharp mitred corners.
+   Letters are drawn back-to-front (a letter whose outline is partly hidden goes underneath). */
+async function rebuildOutlines(lab, order, cols, W, H, tw, th, eps) {
+  const N = W * H, inner = order[order.length - 1], rings = order.slice(0, -1);
+  if (!rings.length) return null;
+  const comp = new Int32Array(N).fill(-1), st = new Int32Array(N), comps = [];
+  for (let p0 = 0; p0 < N; p0++) {
+    if (lab[p0] !== inner || comp[p0] >= 0) continue;
+    const id = comps.length; let sp = 0, n = 0; comp[p0] = id; st[sp++] = p0;
+    while (sp) { const p = st[--sp], x = p % W; n++;
+      for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W])
+        if (q >= 0 && q < N && comp[q] < 0 && lab[q] === inner) { comp[q] = id; st[sp++] = q; } }
+    comps.push({ id, n });
+  }
+  const big = comps.filter(c => c.n >= Math.max(150, N * 0.0008));
+  if (!big.length) return null;
+  // how far each outline reaches from the letters
+  const dIn = new Float32Array(N); for (let p = 0; p < N; p++) dIn[p] = lab[p] === inner ? 0 : 1e9;
+  chamfer34(dIn, W, H);
+  const D = [];
+  for (let i = 0; i < rings.length; i++) {
+    const L = rings[i], outL = i === 0 ? 0 : rings[i - 1], h = new Uint32Array(1500); let tot = 0;
+    for (let p = 0; p < N; p++) { if (lab[p] !== L) continue; const x = p % W;
+      for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W])
+        if (q >= 0 && q < N && lab[q] === outL) { const k = Math.round(dIn[p] / 3); if (k < 1500) { h[k]++; tot++; } break; } }
+    let m = 1; for (let k = 1; k < 1500; k++) if (h[k] > h[m]) m = k;
+    let near = 0; for (let k = Math.max(0, m - 2); k <= m + 2; k++) near += h[k];
+    if (!tot || near / tot < 0.45) return null; // outline widths aren't even: not this kind of logo
+    D.push(m + 0.5);
+  }
+  for (let i = 1; i < D.length; i++) if (D[i] >= D[i - 1]) return null;
+  await tick();
+  // stacking: letters whose outline is partly covered by another letter go underneath
+  const dC = new Float32Array(N);
+  for (const c of big) {
+    for (let p = 0; p < N; p++) dC[p] = comp[p] === c.id ? 0 : 1e9;
+    chamfer34(dC, W, H);
+    // how much of this letter's outline shows the expected colours in the expected order
+    let ring = 0, ok = 0;
+    for (let p = 0; p < N; p++) {
+      if (comp[p] === c.id || lab[p] === 0) continue;
+      const d = dC[p] / 3; if (d > D[0] - 2) continue;
+      let i = 0; while (i + 1 < D.length && d <= D[i + 1]) i++;
+      if (Math.abs(d - D[i]) < 2 || (i + 1 < D.length && Math.abs(d - D[i + 1]) < 2)) continue;
+      ring++; if (lab[p] === rings[i]) ok++;
+    }
+    c.vis = ring ? ok / ring : 1;
+    const mask = new Uint8Array(N); for (let p = 0; p < N; p++) if (comp[p] === c.id) mask[p] = 1;
+    c.loops = traceLoops(mask, W, H).map(l => simplifyLoop(l, eps)).filter(l => l[0].length >= 3 && polyArea(l) >= 6);
+    await tick();
+  }
+  big.sort((a, b) => a.vis - b.vis);
+  const out = mk(tw, th), ox = out.getContext('2d', { willReadFrequently: true }), sc = tw / W, items = [];
+  ox.lineJoin = 'miter'; ox.miterLimit = 10;
+  const draw = (loops, c, sw) => {
+    ox.fillStyle = ox.strokeStyle = `rgb(${c[0]},${c[1]},${c[2]})`; ox.beginPath();
+    for (const [xs, ys] of loops) { ox.moveTo(xs[0] * sc, ys[0] * sc); for (let i = 1; i < xs.length; i++) ox.lineTo(xs[i] * sc, ys[i] * sc); ox.closePath(); }
+    ox.fill('evenodd'); if (sw) { ox.lineWidth = sw * sc; ox.stroke(); }
+    items.push({ c, loops, sw });
+  };
+  for (const c of big) {
+    rings.forEach((L, i) => draw(c.loops, cols[L - 1], 2 * D[i]));
+    draw(c.loops, cols[inner - 1], 0);
+  }
+  const res = ox.getImageData(0, 0, tw, th); res.vector = { W, H, layers: items }; return res;
+}
+
 async function vectorLogo(src, tw, th, cols, level) {
   const W = src.width, H = src.height, sd = src.data, N = W * H, K = cols.length + 1;
   // 1. clean label map: snap to colours, then a light majority vote to remove specks/fuzz
@@ -1230,6 +1310,7 @@ async function vectorLogo(src, tw, th, cols, level) {
   const sum = new Float64Array(K), cnt = new Float64Array(K);
   for (let p = 0; p < N; p++) { sum[lab[p]] += Math.min(dist[p], 1e6); cnt[lab[p]]++; }
   const order = [...Array(cols.length).keys()].map(k => k + 1).filter(k => cnt[k] > 0).sort((a, b) => sum[a] / cnt[a] - sum[b] / cnt[b]);
+  if ($('#evenOutlines').checked) { const rb = await rebuildOutlines(lab, order, cols, W, H, tw, th, eps); if (rb) return rb; }
   // 3. trace + straighten + draw each stacked layer
   const out = mk(tw, th), ox = out.getContext('2d', { willReadFrequently: true }), sc = tw / W;
   const rank = new Int16Array(K).fill(-1); order.forEach((k, i) => rank[k] = i);
@@ -1238,7 +1319,7 @@ async function vectorLogo(src, tw, th, cols, level) {
     for (let p = 0; p < N; p++) inside[p] = lab[p] && rank[lab[p]] >= li ? 1 : 0;
     const loops = traceLoops(inside, W, H).map(l => simplifyLoop(l, eps)).filter(l => l[0].length >= 3 && polyArea(l) >= 6);
     const c = cols[order[li] - 1];
-    layers.push({ c, loops, seal: li > 0 });
+    layers.push({ c, loops, sw: li > 0 ? 0.9 : 0 });
     ox.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; ox.beginPath();
     for (const [xs, ys] of loops) { ox.moveTo(xs[0] * sc, ys[0] * sc); for (let i = 1; i < xs.length; i++) ox.lineTo(xs[i] * sc, ys[i] * sc); ox.closePath(); }
     ox.fill('evenodd');
@@ -1250,9 +1331,9 @@ async function vectorLogo(src, tw, th, cols, level) {
 function vectorSVG({ W, H, layers }, inW) {
   const f = v => Math.round(v * 100) / 100, hx = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
   let out = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${inW}in" height="${f(inW * H / W)}in">\n`;
-  for (const { c, loops, seal } of layers) {
+  for (const { c, loops, sw } of layers) {
     const d = loops.map(([xs, ys]) => 'M' + xs.map((x, i) => f(x) + ' ' + f(ys[i])).join('L') + 'Z').join('');
-    out += `<path fill="${hx(c)}" fill-rule="evenodd"${seal ? ` stroke="${hx(c)}" stroke-width="0.9" stroke-linejoin="miter"` : ''} d="${d}"/>\n`;
+    out += `<path fill="${hx(c)}" fill-rule="evenodd"${sw ? ` stroke="${hx(c)}" stroke-width="${f(sw)}" stroke-linejoin="miter" stroke-miterlimit="10"` : ''} d="${d}"/>\n`;
   }
   return out + '</svg>\n';
 }
