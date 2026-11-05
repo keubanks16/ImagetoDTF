@@ -381,7 +381,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 3:00 AM — satin outlines in the digitizer, thread colors matched to cap fabric</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 3:55 AM — satin covers overlap seams; angle view geometry fixed</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -1802,34 +1802,43 @@ function satinChains(mask, W, H, spacing, maxLen) {
     const id = nComp++, cm = new Uint8Array(N); let sp = 0; comp[p0] = id; st[sp++] = p0;
     while (sp) { const p = st[--sp], x = p % W; cm[p] = 1;
       for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) if (q >= 0 && q < N && mask[q] && comp[q] < 0) { comp[q] = id; st[sp++] = q; } }
-    // outer edge = the longest loop of this piece
-    const loops = traceLoops(cm, W, H); if (!loops.length) continue;
-    let best = null, ba = -1; for (const l of loops) { const a = polyArea(l); if (a > ba) { ba = a; best = l; } }
-    const [xs, ys] = best, n = xs.length; if (n < 3 || ba < 4) continue;
-    // resample the loop every `spacing`
-    const pts = []; let carry = 0;
-    for (let i = 0; i < n; i++) {
-      const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], len = Math.hypot(x1 - x0, y1 - y0); if (!len) continue;
-      let t = carry;
-      while (t < len) { const u = t / len; pts.push([x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, (x1 - x0) / len, (y1 - y0) / len]); t += spacing; }
-      carry = t - len;
-    }
+    // walk every edge of this piece (longest first); stretches already stitched from another edge are skipped
+    const loops = traceLoops(cm, W, H).map(l => ({ l, a: polyArea(l) })).filter(o => o.a >= 4).sort((p, q) => q.a - p.a);
+    if (!loops.length) continue;
+    const covered = new Uint8Array(N), rc = Math.max(2, spacing * 0.75);
+    const paint = (x0, y0, x1, y1) => { const len = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.ceil(len / 0.7));
+      for (let i = 0; i <= n; i++) { const x = x0 + (x1 - x0) * i / n, y = y0 + (y1 - y0) * i / n;
+        for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) { if (dx * dx + dy * dy > rc * rc) continue; const xi = Math.floor(x + dx), yi = Math.floor(y + dy); if (xi >= 0 && yi >= 0 && xi < W && yi < H) covered[yi * W + xi] = 1; } } };
+    const isCovered = (x0, y0, x1, y1) => { let hit = 0; for (const t of [0.25, 0.5, 0.75]) { const xi = Math.floor(x0 + (x1 - x0) * t), yi = Math.floor(y0 + (y1 - y0) * t); if (xi >= 0 && yi >= 0 && xi < W && yi < H && covered[yi * W + xi]) hit++; } return hit >= 3; };
     const inside = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H && cm[yi * W + xi]; };
-    const chain = [];
-    for (let i = 0; i < pts.length; i++) {
-      const [px, py] = pts[i];
-      // direction along the edge (smoothed over neighbours), inward normal = to the right of travel
-      const a = pts[(i + pts.length - 2) % pts.length], b = pts[(i + 2) % pts.length];
-      let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
-      const nx = -ty, ny = tx;
-      let sx = px + nx * 0.6, sy = py + ny * 0.6; if (!inside(sx, sy)) { sx = px - nx * 0.6; sy = py - ny * 0.6; if (!inside(sx, sy)) continue; }
-      const dirx = sx - px > 0 === nx > 0 ? nx : -nx, diry = sx - px > 0 === nx > 0 ? ny : -ny;
-      let L = 0.6, lx = sx, ly = sy;
-      while (L < maxLen) { const qx = px + dirx * (L + 0.5), qy = py + diry * (L + 0.5); if (!inside(qx, qy)) break; lx = qx; ly = qy; L += 0.5; }
-      if (L < 2) continue;
-      chain.push([Math.round(sx), Math.round(sy)], [Math.round(lx), Math.round(ly)]);
+    for (const { l: [xs, ys] } of loops) {
+      const n = xs.length; if (n < 3) continue;
+      const pts = []; let carry = 0;
+      for (let i = 0; i < n; i++) {
+        const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], len = Math.hypot(x1 - x0, y1 - y0); if (!len) continue;
+        let t = carry;
+        while (t < len) { const u = t / len, q = [x0 + (x1 - x0) * u, y0 + (y1 - y0) * u];
+          // space by straight-line distance (a traced diagonal is a pixel staircase, longer than it looks)
+          if (!pts.length || Math.hypot(q[0] - pts[pts.length - 1][0], q[1] - pts[pts.length - 1][1]) >= spacing * 0.95) pts.push(q);
+          t += spacing * 0.5; }
+        carry = t - len;
+      }
+      let chain = [], lastEnd = null;
+      const flush = () => { if (chain.length >= 4) chains.push(chain); chain = []; };
+      for (let i = 0; i < pts.length; i++) {
+        const [px, py] = pts[i], a = pts[(i + pts.length - 2) % pts.length], b = pts[(i + 2) % pts.length];
+        let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+        let nx = -ty, ny = tx; // inward is to the right of travel
+        let sx = px + nx * 0.6, sy = py + ny * 0.6; if (!inside(sx, sy)) { nx = -nx; ny = -ny; sx = px + nx * 0.6; sy = py + ny * 0.6; if (!inside(sx, sy)) { flush(); continue; } }
+        let L = 0.6, lx = sx, ly = sy;
+        while (L < maxLen) { const qx = px + nx * (L + 0.5), qy = py + ny * (L + 0.5); if (!inside(qx, qy)) break; lx = qx; ly = qy; L += 0.5; }
+        if (L < 2 || isCovered(sx, sy, lx, ly)) { flush(); continue; }
+        if (lastEnd && Math.hypot(sx - lastEnd[0], sy - lastEnd[1]) > spacing * 3) flush();
+        chain.push([Math.round(sx), Math.round(sy)], [Math.round(lx), Math.round(ly)]); lastEnd = [sx, sy];
+        paint(sx, sy, lx, ly);
+      }
+      flush();
     }
-    if (chain.length >= 4) chains.push(chain);
   }
   return chains;
 }
@@ -2159,14 +2168,14 @@ $$('#embSizes button').forEach(btn => btn.onclick = () => { if (btn.dataset.h) {
    angle: the four corners (TL, TR, BR, BL) of the front-panel area on the 3/4 photo, as image fractions. */
 const HAT_WIDTH_IN = 7.6;
 const HATS = [
-  { id: 'navy-columbia', name: 'Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
-  { id: 'columbia-navy', name: 'Columbia · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.285, 0.335], [0.62, 0.29], [0.645, 0.695], [0.275, 0.745]] } },
+  { id: 'navy-columbia', name: 'Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } },
+  { id: 'columbia-navy', name: 'Columbia · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.255, 0.31], [0.643, 0.245], [0.635, 0.675], [0.25, 0.745]] } },
   { id: 'columbia', name: 'Columbia', front: { cx: 0.5, cy: 0.555 }, angle: null },
   { id: 'navy', name: 'Navy', front: { cx: 0.5, cy: 0.555 }, angle: null },
-  { id: 'navy-white', name: 'Navy · White front', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.305, 0.325], [0.64, 0.28], [0.665, 0.685], [0.295, 0.735]] } },
-  { id: 'white-navy', name: 'White · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
-  { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
-  { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } }
+  { id: 'navy-white', name: 'Navy · White front', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.275, 0.3], [0.663, 0.235], [0.655, 0.665], [0.27, 0.735]] } },
+  { id: 'white-navy', name: 'White · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } },
+  { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } },
+  { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.265, 0.3], [0.653, 0.235], [0.645, 0.665], [0.26, 0.735]] } }
 ];
 EMB.view = 'stitch'; EMB.hat = 0; EMB.hatView = 'front';
 const hatImgs = {};
@@ -2291,7 +2300,7 @@ $$('#embView button').forEach(btn => btn.onclick = () => {
   if (EMB.view === 'hat') { if (!EMB.hatSized) { EMB.hatSized = true; $('#embH').value = 2.75; embSyncSizes('h'); embRefresh(); } embHatChips(); embHatRender(); } else if (EMB.stream) embPreview();
 });
 
-window.__emb = { EMB, embHatRender, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
+window.__emb = { EMB, embHatRender, traceLoops, polyArea, satinChains, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
 
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
