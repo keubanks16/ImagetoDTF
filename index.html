@@ -164,7 +164,7 @@
           <button class="sw" style="background:#1e40af" data-c="#1e40af" title="Blue"></button>
           <label class="pick"><input type="color" id="color" value="#e3141b"><span>Pick color</span></label>
         </div>
-        <label class="f">Swap a color <small>— tap a color in your design to change it to any color</small></label>
+        <label class="f">Swap a color <small>— tap a color (or the outer outline) to change it to any color</small></label>
         <div class="pal" id="palette"></div>
         <div class="swapbox hidden" id="swapBox">
           <div class="row" style="justify-content:space-between"><b id="swapTitle">Change this color to:</b></div>
@@ -485,8 +485,68 @@ function palette(id) {
     const g = groups.find(g => Math.max(...g.c.map((v, j) => Math.abs(v - c[j]))) < 45);
     if (g) g.n += e[0]; else if (groups.length < 40) groups.push({ c, n: e[0] });
   }
-  return groups.filter(g => g.n / total >= 0.008).sort((a, b) => b.n - a.n).slice(0, 8)
-    .map(g => ({ rgb: g.c.map(Math.round), pct: g.n / total * 100 }));
+  const big = groups.filter(g => g.n / total >= 0.008).sort((a, b) => b.n - a.n);
+  const keep = big.filter((g, gi) => { // hide in-between edge colours (a blend of two bigger colours)
+    if (g.n / total > 0.05) return true;
+    for (let a = 0; a < gi; a++) for (let b = a + 1; b < gi; b++) {
+      const A = big[a].c, B = big[b].c; let num = 0, den = 0;
+      for (let j = 0; j < 3; j++) { num += (g.c[j] - B[j]) * (A[j] - B[j]); den += (A[j] - B[j]) ** 2; }
+      const t = den ? Math.max(0, Math.min(1, num / den)) : 0;
+      if (Math.max(...[0, 1, 2].map(j => Math.abs(t * A[j] + (1 - t) * B[j] - g.c[j]))) < 22) return false;
+    }
+    return true;
+  });
+  return { total, colors: keep.slice(0, 8).map(g => ({ rgb: g.c.map(Math.round), pct: g.n / total * 100 })) };
+}
+/* Outer outline: the ring of colour around the very outside of the design
+   (everything connected to the transparent edge that shares the edge's colour). */
+function outerRegion(d, W, H, tol = 50) {
+  const N = W * H, bins = new Map(), edge = [];
+  const clear = p => d[p * 4 + 3] < 16;
+  for (let p = 0; p < N; p++) {
+    if (d[p * 4 + 3] < 128) continue;
+    const x = p % W, y = (p / W) | 0;
+    if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || clear(p - 1) || clear(p + 1) || clear(p - W) || clear(p + W)) {
+      edge.push(p); const i = p * 4, k = (d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | (d[i + 2] >> 4);
+      const e = bins.get(k) || [0, 0, 0, 0]; e[0]++; e[1] += d[i]; e[2] += d[i + 1]; e[3] += d[i + 2]; bins.set(k, e);
+    }
+  }
+  if (!edge.length) return null;
+  let best = null; for (const e of bins.values()) if (!best || e[0] > best[0]) best = e;
+  const seed = [best[1] / best[0], best[2] / best[0], best[3] / best[0]].map(Math.round);
+  const ok = p => { const i = p * 4; return d[i + 3] >= 16 && Math.abs(d[i] - seed[0]) <= tol && Math.abs(d[i + 1] - seed[1]) <= tol && Math.abs(d[i + 2] - seed[2]) <= tol; };
+  // distance (in 1/3 px, chamfer 3-4) from the transparent edge, travelling only through the outline colour
+  const INF = 1e9, dist = new Float64Array(N).fill(INF), buckets = [];
+  const push = (p, dv) => { (buckets[dv] || (buckets[dv] = [])).push(p); };
+  for (const p of edge) if (ok(p)) { dist[p] = 0; push(p, 0); }
+  const CAP = Math.max(W, H) * 3;
+  for (let dv = 0; dv < buckets.length && dv <= CAP; dv++) {
+    const bk = buckets[dv]; if (!bk) continue;
+    for (const p of bk) {
+      if (dist[p] !== dv) continue;
+      const x = p % W, y = (p / W) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const q = ny * W + nx, nd = dv + (dx && dy ? 4 : 3);
+        if (nd < dist[q] && ok(q)) { dist[q] = nd; push(q, nd); }
+      }
+    }
+    buckets[dv] = null;
+  }
+  // outline thickness = most common distance where the outline colour meets a different colour inside
+  const hist = new Uint32Array(2000);
+  for (let p = 0; p < N; p++) {
+    if (dist[p] >= INF) continue;
+    const x = p % W;
+    const nb = [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W];
+    for (const q of nb) if (q >= 0 && q < N && d[q * 4 + 3] >= 128 && dist[q] >= INF) { const k = Math.round(dist[p] / 3); if (k > 0 && k < 2000) hist[k]++; break; }
+  }
+  let mode = 0; for (let k = 1; k < 2000; k++) if (hist[k] > hist[mode]) mode = k;
+  if (!mode || hist[mode] < 20) return null; // no separate outline ring
+  const lim = (mode + 1.5) * 3, mask = new Uint8Array(N); let n = 0;
+  for (let p = 0; p < N; p++) if (dist[p] <= lim) { mask[p] = 1; n++; }
+  return n ? { mask, seed, tol, n } : null;
 }
 function colorRegion(d, W, H, from, tol) {
   const N = W * H, mask = new Uint8Array(N); let n = 0;
@@ -497,8 +557,14 @@ function colorRegion(d, W, H, from, tol) {
 
 function applyOp(img, op) {
   const d = img.data, W = img.width, H = img.height;
+  if (op.type === 'outer') {
+    const r = outerRegion(d, W, H);
+    if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
+    return !!r;
+  }
   if (op.type === 'swap') {
     const r = colorRegion(d, W, H, op.from, op.tol);
+    if (r && op.keepOuter) { const o = outerRegion(d, W, H); if (o) for (let p = 0; p < W * H; p++) if (o.mask[p]) r.mask[p] = 0; }
     if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
     return !!r;
   }
@@ -794,11 +860,12 @@ $('#outlineBtn').onclick = () => {
   else toast('No white outline found around the design.');
 };
 let swapFrom = null;
-function openSwap(rgb, hex) {
-  swapFrom = rgb;
+const hx = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+function openSwap(target) {
+  swapFrom = target;
   const box = $('#swapBox'); box.classList.remove('hidden');
   $('#swapColor').value = S.color;
-  const upd = () => $('#swapTitle').innerHTML = `Change <span class="prev" style="background:${hex}"></span> to <span class="prev" style="background:${$('#swapColor').value}"></span>`;
+  const upd = () => $('#swapTitle').innerHTML = `Change ${target.kind === 'outer' ? '<u>outer outline</u>' : ''} <span class="prev" style="background:${target.hex}"></span> to <span class="prev" style="background:${$('#swapColor').value}"></span>`;
   $('#swapSw').innerHTML = '';
   $$('#swatches .sw').forEach(sw => { const c = sw.cloneNode(); c.classList.toggle('on', c.dataset.c === $('#swapColor').value);
     c.onclick = () => { $('#swapColor').value = c.dataset.c; $('#swapHex').value = c.dataset.c.toUpperCase(); $$('#swapSw .sw').forEach(x => x.classList.toggle('on', x === c)); upd(); };
@@ -812,21 +879,25 @@ function openSwap(rgb, hex) {
 $('#swapCancel').onclick = () => { $('#swapBox').classList.add('hidden'); swapFrom = null; };
 $('#swapApply').onclick = () => {
   if (!swapFrom) return;
-  const op = { type: 'swap', from: swapFrom, tol: Math.min(+$('#tol').value, 70), color: $('#swapColor').value, shade: $('#shade').checked }, test = copyID(S.work);
+  const color = $('#swapColor').value, shade = $('#shade').checked;
+  const op = swapFrom.kind === 'outer' ? { type: 'outer', color, shade }
+    : { type: 'swap', from: swapFrom.rgb, tol: Math.min(+$('#tol').value, 70), color, shade, keepOuter: swapFrom.keepOuter };
+  const test = copyID(S.work);
   if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
   $('#swapBox').classList.add('hidden'); swapFrom = null;
 };
 function drawPalette() {
   const el = $('#palette'); if (!el || !S.work) return;
-  const hx = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
   el.innerHTML = '';
-  for (const p of palette(S.work)) {
-    const b = document.createElement('button');
-    b.innerHTML = `<i style="background:${hx(p.rgb)}"></i>${hx(p.rgb).toUpperCase()} <small>${p.pct < 1 ? '<1' : Math.round(p.pct)}%</small>`;
-    b.title = 'Change this color to the selected color';
-    b.onclick = () => openSwap(p.rgb, hx(p.rgb));
-    el.appendChild(b);
-  }
+  const { total, colors } = palette(S.work);
+  const o = outerRegion(S.work.data, S.W, S.H);
+  // only offer "Outer outline" when the outside edge is a separate ring, not the whole design
+  const ring = o && total && o.n / (total * 4) < 0.55 ? o : null;
+  const chip = (html, fn) => { const b = document.createElement('button'); b.innerHTML = html; b.onclick = fn; el.appendChild(b); return b; };
+  if (ring) chip(`<i style="background:#fff;box-shadow:inset 0 0 0 5px ${hx(ring.seed)},0 0 0 1px rgba(0,0,0,.2)"></i>Outer outline`,
+    () => openSwap({ kind: 'outer', hex: hx(ring.seed) }));
+  for (const p of colors) chip(`<i style="background:${hx(p.rgb)}"></i>${hx(p.rgb).toUpperCase()} <small>${p.pct < 1 ? '<1' : Math.round(p.pct)}%</small>`,
+    () => openSwap({ kind: 'color', rgb: p.rgb, hex: hx(p.rgb), keepOuter: !!ring }));
   if (!el.children.length) el.innerHTML = '<span class="hint">No solid colors found.</span>';
 }
 function toast(m) { const h = $('#toolHint'); const old = h.innerHTML; h.innerHTML = '<b style="color:#c0262d">' + m + '</b>'; setTimeout(() => h.innerHTML = hints[S.tool] || old, 1800); }
