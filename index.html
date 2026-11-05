@@ -83,6 +83,18 @@
   .stat .warn{color:#b45309;font-weight:600}
   .linkbtn{border:0;background:none;color:#2f6f9e;font-weight:600;text-decoration:underline;padding:0;cursor:pointer;font-size:14px}
   .hidden{display:none!important}
+  .tabs{max-width:980px;margin:12px auto 0;padding:0 14px}
+  .gsrow{display:grid;grid-template-columns:1fr;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+  .gsrow:first-of-type{border-top:0}
+  .gsrow .top{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700;font-size:15px}
+  .gsrow .top i{display:inline-block;width:22px;height:22px;border-radius:6px;vertical-align:-5px;margin-right:6px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
+  .gsrow .top i.clear{background-image:linear-gradient(45deg,#ccc 25%,transparent 25%,transparent 75%,#ccc 75%),linear-gradient(45deg,#ccc 25%,#fff 25%,#fff 75%,#ccc 75%);background-size:8px 8px;background-position:0 0,4px 4px}
+  .gsrow .tr{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
+  .gsrow .tr input{width:20px;height:20px;accent-color:var(--accent)}
+  .gsrow .sws{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .gsrow .sws .sw{width:30px;height:30px}
+  .gsrow input[type=text]{width:96px;padding:8px;border:1px solid var(--line);border-radius:9px;font-size:16px}
+  #gsCanvas{display:block;width:100%;height:auto}
 </style>
 </head>
 <body>
@@ -92,7 +104,12 @@
   <p>Remove the background, fix colors, and export a 300 DPI transparent PNG for DTF printing.</p></div>
 </div></header>
 
-<main>
+<div class="tabs"><div class="seg" id="appTabs">
+  <button data-tab="dtf" class="on">Image → DTF</button>
+  <button data-tab="gs">Vectorized GS Logo</button>
+</div></div>
+
+<main id="dtfMain">
   <label class="drop card" id="drop">
     <img src="logo.png" alt="">
     <strong>Tap to upload an image</strong>
@@ -223,6 +240,57 @@
       <button class="btn dark" id="svgBtn" style="width:100%;margin-top:8px;padding:13px">Download SVG (vector)</button>
       <button class="btn dark hidden" id="share" style="width:100%;margin-top:8px;padding:13px">Share / Save to Files</button>
       <p class="hint" id="done"></p>
+    </div>
+  </div>
+</main>
+
+<main id="gsMain" class="hidden">
+  <div class="grid">
+    <div>
+      <div class="card sticky">
+        <div class="chips" id="gsBg" style="margin-bottom:10px">
+          <button data-bg="checker" class="on">Transparent</button>
+          <button data-bg="black">Black shirt</button>
+          <button data-bg="white">White shirt</button>
+          <button data-bg="gray">Gray</button>
+          <button data-bg="navy">Navy</button>
+        </div>
+        <div class="stage checker" id="gsStage"><canvas id="gsCanvas" width="1000" height="800"></canvas></div>
+        <p class="hint">The official GS logo rebuilt from exact shapes — every line perfectly straight, every outline one even width. It looks this sharp at any size.</p>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Colors</h2>
+        <div class="chips" id="gsPresets" style="margin-bottom:6px">
+          <button data-p="#69C9F5,#14264D,#FFFFFF">Columbia · Navy · White</button>
+          <button data-p="#F5091E,#14264D,#FFFFFF">Red · Navy · White</button>
+          <button data-p="#14264D,#69C9F5,#FFFFFF">Navy · Columbia · White</button>
+          <button data-p="#FFFFFF,#14264D,#69C9F5">White · Navy · Columbia</button>
+        </div>
+        <div id="gsParts"></div>
+      </div>
+      <div class="card">
+        <h2>Outline widths</h2>
+        <label class="f">Outer border <small id="gsWoV">15</small></label>
+        <input type="range" id="gsWo" min="0" max="30" value="15">
+        <label class="f">Inner border <small id="gsWiV">13</small></label>
+        <input type="range" id="gsWi" min="0" max="30" value="13">
+      </div>
+      <div class="card">
+        <h2>Print size</h2>
+        <label class="f">Logo width (inches)</label>
+        <div class="row">
+          <input type="number" id="gsW" value="10" min="1" max="24" step="0.25">
+          <div class="chips" id="gsSizes">
+            <button data-w="3.5">Pocket</button><button data-w="5">Youth</button><button data-w="10" class="on">Adult</button><button data-w="12">12"</button>
+          </div>
+        </div>
+        <div class="stat" id="gsStat">—</div>
+      </div>
+      <button class="btn primary" id="gsPng">Download GS Logo PNG</button>
+      <button class="btn dark" id="gsSvg" style="width:100%;margin-top:8px;padding:13px">Download SVG (vector)</button>
+      <p class="hint" id="gsDone"></p>
     </div>
   </div>
 </main>
@@ -1417,6 +1485,138 @@ $('#share').onclick = async () => {
   if (NATIVE) { try { await nativeSave(S.lastBlob, S.lastName); } catch (e) { alert(e.message || e); } return; }
   try { await navigator.share({ files: [new File([S.lastBlob], S.lastName, { type: 'image/png' })], title: S.lastName }); } catch (e) {}
 };
+
+
+/* ---------------- Vectorized GS Logo ----------------
+   The official interlocking GS, rebuilt from exact polygons (letter faces). The two borders are
+   exact mitred offsets of the same polygons, so every edge stays straight and parallel. Letters are
+   drawn back to front (G, G crossbar, then S). Any part can be made transparent: it is cut out of
+   everything underneath, so the shirt shows through. */
+const GS_SHAPES = [
+  [[290,151],[752,151],[813,211],[797,297],[662,297],[667,269],[337,269],[303,294],[239,603],[272,631],[533,631],[493,759],[167,759],[83,673],[170,242]],
+  [[421,424],[745,424],[742,446],[663,446],[566,523],[402,523]],
+  [[670,458],[1123,458],[1184,520],[1170,601],[1051,601],[1055,579],[717,579],[701,591],[676,709],[690,724],[1070,724],[1135,792],[1088,1037],[981,1105],[491,1105],[416,1040],[435,948],[563,948],[558,979],[579,1004],[939,1004],[970,982],[994,859],[965,837],[582,837],[519,777],[568,524]]
+];
+const GS_PARTS = [
+  { key: 'outer', label: 'Outer border', def: '#69C9F5' },
+  { key: 'inner', label: 'Inner border', def: '#14264D' },
+  { key: 'face', label: 'Letters', def: '#FFFFFF' }
+];
+const GS_SW = [['#69C9F5', 'Columbia blue'], ['#559BCB', 'GS light blue'], ['#14264D', 'Navy'], ['#192649', 'GS navy'], ['#F5091E', 'Red'], ['#FFFFFF', 'White'], ['#111111', 'Black'], ['#D4A017', 'Gold']];
+const gsState = { outer: { c: '#69C9F5', clear: false }, inner: { c: '#14264D', clear: false }, face: { c: '#FFFFFF', clear: false } };
+function gsBuildUI() {
+  const box = $('#gsParts'); box.innerHTML = '';
+  for (const part of GS_PARTS) {
+    const st = gsState[part.key], row = document.createElement('div'); row.className = 'gsrow';
+    row.innerHTML = `<div class="top"><span><i></i>${part.label}</span><label class="tr"><input type="checkbox"> Transparent</label></div>
+      <div class="sws">${GS_SW.map(([c, n]) => `<button class="sw" style="background:${c}" data-c="${c}" title="${n}"></button>`).join('')}
+      <label class="pick"><input type="color"><span>Any…</span></label><input type="text" maxlength="7" autocapitalize="characters" placeholder="#HEX"></div>`;
+    const chip = row.querySelector('.top i'), cb = row.querySelector('.tr input'), col = row.querySelector('input[type=color]'), hex = row.querySelector('input[type=text]');
+    const sync = () => {
+      chip.className = st.clear ? 'clear' : ''; chip.style.background = st.clear ? '' : st.c;
+      cb.checked = st.clear; col.value = st.c.toLowerCase(); hex.value = st.c.toUpperCase();
+      row.querySelectorAll('.sw').forEach(b => b.classList.toggle('on', !st.clear && b.dataset.c.toUpperCase() === st.c.toUpperCase()));
+      row.querySelector('.sws').style.opacity = st.clear ? .4 : 1;
+    };
+    row.querySelectorAll('.sw').forEach(b => b.onclick = () => { st.c = b.dataset.c; st.clear = false; sync(); gsRender(); });
+    col.oninput = () => { st.c = col.value.toUpperCase(); st.clear = false; sync(); gsRender(); };
+    hex.oninput = () => { let v = hex.value.trim(); if (!v.startsWith('#')) v = '#' + v;
+      if (/^#[0-9a-f]{6}$/i.test(v)) { st.c = v.toUpperCase(); st.clear = false; sync(); gsRender(); } };
+    cb.onchange = () => { st.clear = cb.checked; sync(); gsRender(); };
+    part.sync = sync; sync(); box.appendChild(row);
+  }
+}
+function gsOps() { // drawing steps: [shape, colour or null (= cut out), stroke width]
+  const wo = +$('#gsWo').value, wi = +$('#gsWi').value, ops = [];
+  for (const pts of GS_SHAPES) {
+    ops.push([pts, gsState.outer.clear ? null : gsState.outer.c, 2 * (wo + wi)]);
+    ops.push([pts, gsState.inner.clear ? null : gsState.inner.c, 2 * wi]);
+    ops.push([pts, gsState.face.clear ? null : gsState.face.c, 0]);
+  }
+  return ops;
+}
+function gsDraw(ctx, k, ox, oy) {
+  ctx.setTransform(k, 0, 0, k, -ox * k, -oy * k);
+  ctx.lineJoin = 'miter'; ctx.miterLimit = 3;
+  for (const [pts, c, w] of gsOps()) {
+    const path = new Path2D(); pts.forEach(([x, y], i) => i ? path.lineTo(x, y) : path.moveTo(x, y)); path.closePath();
+    ctx.globalCompositeOperation = c ? 'source-over' : 'destination-out';
+    ctx.fillStyle = ctx.strokeStyle = c || '#000';
+    ctx.fill(path); if (w > 0) { ctx.lineWidth = w; ctx.stroke(path); }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over';
+}
+function gsBounds() { // trimmed bounds of what's visible, in logo units
+  const c = mk(1254, 1254), x = c.getContext('2d', { willReadFrequently: true }); gsDraw(x, 1, 0, 0);
+  const d = x.getImageData(0, 0, 1254, 1254).data; let x0 = 1254, y0 = 1254, x1 = -1, y1 = -1;
+  for (let y = 0; y < 1254; y++) for (let xx = 0; xx < 1254; xx++) if (d[(y * 1254 + xx) * 4 + 3] > 8) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) return [0, 0, 1254, 1254];
+  return [x0 - 2, y0 - 2, x1 + 3, y1 + 3];
+}
+function gsSize() {
+  const b = gsBounds(), inW = Math.max(1, Math.min(24, +$('#gsW').value || 10));
+  const tw = Math.round(inW * 300), k = tw / (b[2] - b[0]), th = Math.round((b[3] - b[1]) * k);
+  return { b, inW, tw, th, k };
+}
+function gsRender() {
+  const { b, inW, tw, th } = gsSize(), cv = $('#gsCanvas'), k = 1000 / (b[2] - b[0]);
+  cv.width = 1000; cv.height = Math.round((b[3] - b[1]) * k);
+  const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height); gsDraw(ctx, k, b[0], b[1]);
+  $('#gsStat').innerHTML = `Output: <b>${tw} × ${th} px</b> at 300 DPI<br>Print size: <b>${inW}" × ${(th / 300).toFixed(2)}"</b>`;
+}
+function gsName(ext) {
+  const n = p => gsState[p].clear ? 'Clear' : gsState[p].c.replace('#', '');
+  return `GS_Logo_${n('outer')}-${n('inner')}-${n('face')}_${+$('#gsW').value || 10}in.${ext}`;
+}
+async function gsSave(blob, fname) {
+  if (NATIVE) { await nativeSave(blob, fname); return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+$('#gsPng').onclick = async () => {
+  try {
+    busy(true, 'Building your GS logo…'); await tick();
+    const { b, tw, th, k } = gsSize(), c = mk(tw, th), x = c.getContext('2d');
+    gsDraw(x, k, b[0], b[1]);
+    const blob = setDpi(new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/png'))).arrayBuffer()), 300);
+    const fname = gsName('png'); busy(false); await gsSave(blob, fname);
+    $('#gsDone').innerHTML = `Saved <b>${fname}</b> — ${tw} × ${th} px, 300 DPI, transparent background.`;
+  } catch (e) { alert(e.message || e); } finally { busy(false); }
+};
+$('#gsSvg').onclick = async () => {
+  try {
+    const { b, inW } = gsSize(), W = b[2] - b[0], H = b[3] - b[1];
+    let body = '', defs = '', m = 0;
+    for (const [pts, c, w] of gsOps()) {
+      const d = 'M' + pts.map(([x, y]) => x + ' ' + y).join('L') + 'Z';
+      const strokeA = w > 0 ? ` stroke-width="${w}" stroke-linejoin="miter" stroke-miterlimit="3"` : '';
+      if (c) body += `<path d="${d}" fill="${c}"${w > 0 ? ` stroke="${c}"` + strokeA : ''}/>\n`;
+      else { m++; // cut-out: hide everything drawn so far inside this shape
+        defs += `<mask id="cut${m}" maskUnits="userSpaceOnUse" x="0" y="0" width="1254" height="1254"><rect width="1254" height="1254" fill="#fff"/><path d="${d}" fill="#000"${w > 0 ? ' stroke="#000"' + strokeA : ''}/></mask>\n`;
+        body = `<g mask="url(#cut${m})">\n${body}</g>\n`; }
+    }
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b[0]} ${b[1]} ${W} ${H}" width="${inW}in" height="${(inW * H / W).toFixed(3)}in">\n${defs ? '<defs>\n' + defs + '</defs>\n' : ''}${body}</svg>\n`;
+    const fname = gsName('svg'); await gsSave(new Blob([svg], { type: 'image/svg+xml' }), fname);
+    $('#gsDone').innerHTML = `Saved <b>${fname}</b> — vector file, sharp at any size.`;
+  } catch (e) { alert(e.message || e); }
+};
+$$('#gsPresets button').forEach(btn => btn.onclick = () => {
+  const [o, i, f] = btn.dataset.p.split(',');
+  Object.assign(gsState.outer, { c: o, clear: false }); Object.assign(gsState.inner, { c: i, clear: false }); Object.assign(gsState.face, { c: f, clear: false });
+  GS_PARTS.forEach(p => p.sync()); gsRender();
+});
+$$('#gsBg button').forEach(btn => btn.onclick = () => { $$('#gsBg button').forEach(x => x.classList.toggle('on', x === btn)); $('#gsStage').className = 'stage ' + btn.dataset.bg; });
+$('#gsWo').oninput = e => { $('#gsWoV').textContent = e.target.value; gsRender(); };
+$('#gsWi').oninput = e => { $('#gsWiV').textContent = e.target.value; gsRender(); };
+$('#gsW').oninput = () => { $$('#gsSizes button').forEach(x => x.classList.toggle('on', +x.dataset.w === +$('#gsW').value)); gsRender(); };
+$$('#gsSizes button').forEach(btn => btn.onclick = () => { $('#gsW').value = btn.dataset.w; $('#gsW').oninput(); });
+$$('#appTabs button').forEach(btn => btn.onclick = () => {
+  $$('#appTabs button').forEach(x => x.classList.toggle('on', x === btn));
+  $('#dtfMain').classList.toggle('hidden', btn.dataset.tab !== 'dtf');
+  $('#gsMain').classList.toggle('hidden', btn.dataset.tab !== 'gs');
+  if (btn.dataset.tab === 'gs') gsRender();
+});
+gsBuildUI();
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
 
