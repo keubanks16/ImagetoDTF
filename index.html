@@ -381,7 +381,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 3:55 AM — satin covers overlap seams; angle view geometry fixed</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 5:20 AM — digitizer-style satin (centerline zigzag, mitered corners)</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -1792,52 +1792,69 @@ function embSource() {
 }
 
 /* 2. tatami fill digitizer */
-/* Satin stitch for narrow shapes (outlines, thin letters): zigzag across the stroke, following the
-   outer edge of each piece. mask: 1 = this colour; returns chains of stitch points (0.1 mm units). */
+/* Satin stitch for narrow shapes (outlines, thin letters), digitizer-style: each piece's edges are traced
+   into clean polygons, offset to the stroke's centreline, and a zigzag column is laid across it with
+   mitred fan corners. mask: 1 = this colour; returns chains of stitch points (0.1 mm units). */
 function satinChains(mask, W, H, spacing, maxLen) {
   const N = W * H, comp = new Int32Array(N).fill(-1), st = new Int32Array(N), chains = [];
+  // distance to the outside of the mask (px), for stroke width
+  const dist = new Float32Array(N); for (let p = 0; p < N; p++) dist[p] = mask[p] ? 1e9 : 0;
+  for (let p = 0; p < N; p++) if (mask[p]) { const x = p % W, y = (p / W) | 0; if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || !mask[p - 1] || !mask[p + 1] || !mask[p - W] || !mask[p + W]) dist[p] = 3; }
+  chamfer34(dist, W, H);
   let nComp = 0;
   for (let p0 = 0; p0 < N; p0++) {
     if (!mask[p0] || comp[p0] >= 0) continue;
-    const id = nComp++, cm = new Uint8Array(N); let sp = 0; comp[p0] = id; st[sp++] = p0;
-    while (sp) { const p = st[--sp], x = p % W; cm[p] = 1;
+    const id = nComp++, cm = new Uint8Array(N), ds = []; let sp = 0; comp[p0] = id; st[sp++] = p0;
+    while (sp) { const p = st[--sp], x = p % W; cm[p] = 1; ds.push(dist[p]);
       for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) if (q >= 0 && q < N && mask[q] && comp[q] < 0) { comp[q] = id; st[sp++] = q; } }
-    // walk every edge of this piece (longest first); stretches already stitched from another edge are skipped
-    const loops = traceLoops(cm, W, H).map(l => ({ l, a: polyArea(l) })).filter(o => o.a >= 4).sort((p, q) => q.a - p.a);
-    if (!loops.length) continue;
-    const covered = new Uint8Array(N), rc = Math.max(2, spacing * 0.75);
-    const paint = (x0, y0, x1, y1) => { const len = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.ceil(len / 0.7));
-      for (let i = 0; i <= n; i++) { const x = x0 + (x1 - x0) * i / n, y = y0 + (y1 - y0) * i / n;
-        for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) { if (dx * dx + dy * dy > rc * rc) continue; const xi = Math.floor(x + dx), yi = Math.floor(y + dy); if (xi >= 0 && yi >= 0 && xi < W && yi < H) covered[yi * W + xi] = 1; } } };
-    const isCovered = (x0, y0, x1, y1) => { let hit = 0; for (const t of [0.25, 0.5, 0.75]) { const xi = Math.floor(x0 + (x1 - x0) * t), yi = Math.floor(y0 + (y1 - y0) * t); if (xi >= 0 && yi >= 0 && xi < W && yi < H && covered[yi * W + xi]) hit++; } return hit >= 3; };
-    const inside = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H && cm[yi * W + xi]; };
-    for (const { l: [xs, ys] } of loops) {
-      const n = xs.length; if (n < 3) continue;
-      const pts = []; let carry = 0;
+    if (ds.length < 20) continue;
+    ds.sort((u, v) => u - v);
+    const r = Math.max(2, ds[Math.floor(ds.length * 0.93)] / 3 + 0.5), half = r + 0.8; // half stroke width (+ a little pull compensation)
+    const loops = traceLoops(cm, W, H).map(l => ({ l, a: polyArea(l) })).filter(o => o.a >= 4).sort((u, v) => v.a - u.a);
+    const covered = new Uint8Array(N), rc = Math.max(1.5, r * 0.8);
+    const mark = (x, y) => { for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) { const xi = Math.floor(x + dx), yi = Math.floor(y + dy); if (xi >= 0 && yi >= 0 && xi < W && yi < H) covered[yi * W + xi] = 1; } };
+    const isCov = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H && covered[yi * W + xi]; };
+    const inMask = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H && cm[yi * W + xi]; };
+    for (const { l } of loops) {
+      const [xs, ys] = simplifyLoop(l, 1.4), n = xs.length; if (n < 3) continue;
+      // offset the polygon inward by r (inside is to the right of travel) → centreline vertices
+      const E = []; for (let i = 0; i < n; i++) { const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], L = Math.hypot(x1 - x0, y1 - y0) || 1; E.push({ x0, y0, x1, y1, tx: (x1 - x0) / L, ty: (y1 - y0) / L, nx: -(y1 - y0) / L, ny: (x1 - x0) / L, L }); }
+      const C = [];
       for (let i = 0; i < n; i++) {
-        const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], len = Math.hypot(x1 - x0, y1 - y0); if (!len) continue;
-        let t = carry;
-        while (t < len) { const u = t / len, q = [x0 + (x1 - x0) * u, y0 + (y1 - y0) * u];
-          // space by straight-line distance (a traced diagonal is a pixel staircase, longer than it looks)
-          if (!pts.length || Math.hypot(q[0] - pts[pts.length - 1][0], q[1] - pts[pts.length - 1][1]) >= spacing * 0.95) pts.push(q);
-          t += spacing * 0.5; }
-        carry = t - len;
+        const e0 = E[(i + n - 1) % n], e1 = E[i], px = xs[i], py = ys[i];
+        const ax = e0.x0 + e0.nx * r, ay = e0.y0 + e0.ny * r, bx = e1.x0 + e1.nx * r, by = e1.y0 + e1.ny * r;
+        const den = e0.tx * e1.ty - e0.ty * e1.tx;
+        if (Math.abs(den) < 0.08) { C.push([px + e1.nx * r, py + e1.ny * r]); continue; }
+        const t = ((bx - ax) * e1.ty - (by - ay) * e1.tx) / den, ix = ax + e0.tx * t, iy = ay + e0.ty * t;
+        if (Math.hypot(ix - px, iy - py) > 2.5 * r) C.push([px + e0.nx * r, py + e0.ny * r], [px + e1.nx * r, py + e1.ny * r]); // too sharp: bevel
+        else C.push([ix, iy]);
       }
-      let chain = [], lastEnd = null;
+      // walk the centreline: zigzag across straight runs, fan around corners
+      const m = C.length, pending = []; let chain = [], side = 1, lastDir = null; // coverage is applied after the loop, so it only de-duplicates against other edges
       const flush = () => { if (chain.length >= 4) chains.push(chain); chain = []; };
-      for (let i = 0; i < pts.length; i++) {
-        const [px, py] = pts[i], a = pts[(i + pts.length - 2) % pts.length], b = pts[(i + 2) % pts.length];
-        let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
-        let nx = -ty, ny = tx; // inward is to the right of travel
-        let sx = px + nx * 0.6, sy = py + ny * 0.6; if (!inside(sx, sy)) { nx = -nx; ny = -ny; sx = px + nx * 0.6; sy = py + ny * 0.6; if (!inside(sx, sy)) { flush(); continue; } }
-        let L = 0.6, lx = sx, ly = sy;
-        while (L < maxLen) { const qx = px + nx * (L + 0.5), qy = py + ny * (L + 0.5); if (!inside(qx, qy)) break; lx = qx; ly = qy; L += 0.5; }
-        if (L < 2 || isCovered(sx, sy, lx, ly)) { flush(); continue; }
-        if (lastEnd && Math.hypot(sx - lastEnd[0], sy - lastEnd[1]) > spacing * 3) flush();
-        chain.push([Math.round(sx), Math.round(sy)], [Math.round(lx), Math.round(ly)]); lastEnd = [sx, sy];
-        paint(sx, sy, lx, ly);
+      const zig = (cx, cy, nx, ny) => { // one stitch across the stroke at (cx,cy) with normal (nx,ny)
+        if (isCov(cx, cy) || !inMask(cx, cy)) { flush(); return; }
+        chain.push([Math.round(cx + nx * half * side), Math.round(cy + ny * half * side)]); side = -side; pending.push([cx, cy]); };
+      for (let i = 0; i < m; i++) {
+        const [x0, y0] = C[i], [x1, y1] = C[(i + 1) % m], L = Math.hypot(x1 - x0, y1 - y0); if (L < 0.5) continue;
+        const tx = (x1 - x0) / L, ty = (y1 - y0) / L, nx = -ty, ny = tx;
+        if (lastDir) { // corner fan: rotate the stitch from the previous normal to this one, pivoting on the inside
+          const cross = lastDir[0] * ty - lastDir[1] * tx, a0 = Math.atan2(lastDir[0], -lastDir[1]) , a1 = Math.atan2(tx, -ty);
+          let da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+          const steps = Math.min(14, Math.floor(Math.abs(da) * half / spacing));
+          if (steps > 0 && !isCov(x0, y0) && inMask(x0, y0)) {
+            const pivotSide = cross > 0 ? -1 : 1; // inside of the turn
+            const bis = a0 + da / 2, pvx = x0 + Math.cos(bis) * half * pivotSide * 0.6, pvy = y0 + Math.sin(bis) * half * pivotSide * 0.6;
+            for (let k = 1; k <= steps; k++) { const ang = a0 + da * k / (steps + 1);
+              if (side === pivotSide) chain.push([Math.round(pvx), Math.round(pvy)]); else chain.push([Math.round(x0 + Math.cos(ang) * half * -pivotSide), Math.round(y0 + Math.sin(ang) * half * -pivotSide)]);
+              side = -side; }
+          }
+        }
+        for (let d = 0; d <= L; d += spacing) zig(x0 + tx * d, y0 + ty * d, nx, ny);
+        lastDir = [tx, ty];
       }
       flush();
+      for (const [cx, cy] of pending) mark(cx, cy);
     }
   }
   return chains;
@@ -2300,7 +2317,7 @@ $$('#embView button').forEach(btn => btn.onclick = () => {
   if (EMB.view === 'hat') { if (!EMB.hatSized) { EMB.hatSized = true; $('#embH').value = 2.75; embSyncSizes('h'); embRefresh(); } embHatChips(); embHatRender(); } else if (EMB.stream) embPreview();
 });
 
-window.__emb = { EMB, embHatRender, traceLoops, polyArea, satinChains, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
+window.__emb = { EMB, embHatRender, traceLoops, polyArea, satinChains, simplifyLoop, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
 
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
