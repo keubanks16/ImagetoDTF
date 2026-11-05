@@ -353,7 +353,7 @@
         <div class="row">
           <input type="number" id="embW" value="3.5" min="1" max="12" step="0.25">
           <div class="chips" id="embSizes">
-            <button data-w="2.5">Hat</button><button data-w="3.5" class="on">Left chest</button><button data-w="5">5"</button><button data-w="8">Full front 8"</button>
+            <button data-w="3.25">Hat</button><button data-w="3.5" class="on">Left chest</button><button data-w="5">5"</button><button data-w="8">Full front 8"</button>
           </div>
         </div>
         <label class="f">Fill density</label>
@@ -380,7 +380,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 2:20 AM — real GB998 hat photos in the puff preview</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 2:40 AM — realistic satin puff rendering</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -2092,14 +2092,14 @@ $$('#embSizes button').forEach(btn => btn.onclick = () => { $('#embW').value = b
    angle: the four corners (TL, TR, BR, BL) of the front-panel area on the 3/4 photo, as image fractions. */
 const HAT_WIDTH_IN = 7.6;
 const HATS = [
-  { id: 'navy-columbia', name: 'Navy · Columbia visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
-  { id: 'columbia-navy', name: 'Columbia · Navy visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.285, 0.335], [0.62, 0.29], [0.645, 0.695], [0.275, 0.745]] } },
-  { id: 'columbia', name: 'Columbia', front: { cx: 0.5, cy: 0.545 }, angle: null },
-  { id: 'navy', name: 'Navy', front: { cx: 0.5, cy: 0.545 }, angle: null },
-  { id: 'navy-white', name: 'Navy · White front', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.305, 0.325], [0.64, 0.28], [0.665, 0.685], [0.295, 0.735]] } },
-  { id: 'white-navy', name: 'White · Navy visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
-  { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
-  { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.545 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } }
+  { id: 'navy-columbia', name: 'Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
+  { id: 'columbia-navy', name: 'Columbia · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.285, 0.335], [0.62, 0.29], [0.645, 0.695], [0.275, 0.745]] } },
+  { id: 'columbia', name: 'Columbia', front: { cx: 0.5, cy: 0.555 }, angle: null },
+  { id: 'navy', name: 'Navy', front: { cx: 0.5, cy: 0.555 }, angle: null },
+  { id: 'navy-white', name: 'Navy · White front', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.305, 0.325], [0.64, 0.28], [0.665, 0.685], [0.295, 0.735]] } },
+  { id: 'white-navy', name: 'White · Navy visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
+  { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } },
+  { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: { q: [[0.295, 0.325], [0.63, 0.28], [0.655, 0.685], [0.285, 0.735]] } }
 ];
 EMB.view = 'stitch'; EMB.hat = 0; EMB.hatView = 'front';
 const hatImgs = {};
@@ -2131,30 +2131,51 @@ function drawLogoQuad(x, img, q, N = 40) { // q = [[x,y]...] TL TR BR BL in pixe
     x.save(); x.setTransform(a, bb, c, d, top0[0], top0[1]); x.drawImage(img, sx, 0, sw + 1.2, img.height, 0, 0, sw + 1.2, img.height); x.restore();
   }
 }
+/* Puff render: thick regions (letter faces) become tall satin-over-foam domes, thin regions (outlines)
+   become flat satin borders. Stitches run across each stroke; lit from the upper left with a glossy sheen. */
 function puffImage(src) {
-  const sc = Math.max(1, Math.round(src.W / 520)), W = Math.ceil(src.W / sc), H = Math.ceil(src.H / sc), N = W * H, lab = new Uint8Array(N);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) lab[y * W + x] = src.lab[Math.min(src.H - 1, y * sc) * src.W + Math.min(src.W - 1, x * sc)];
+  const sc = Math.max(1, src.W / 640), W = Math.ceil(src.W / sc), H = Math.ceil(src.H / sc), N = W * H, lab = new Uint8Array(N);
+  const mm = 0.1 * sc; // mm per pixel here
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) lab[y * W + x] = src.lab[Math.min(src.H - 1, Math.round(y * sc)) * src.W + Math.min(src.W - 1, Math.round(x * sc))];
   const d = new Float32Array(N); for (let p = 0; p < N; p++) d[p] = 1e9;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x, l = lab[p]; if (!l) { d[p] = 0; continue; }
     if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || lab[p - 1] !== l || lab[p + 1] !== l || lab[p - W] !== l || lab[p + W] !== l) d[p] = 1; }
-  chamfer34(d, W, H);
-  const R = Math.max(4, W * 0.018) * 3, hgt = new Float32Array(N);
-  for (let p = 0; p < N; p++) { if (!lab[p]) continue; const t = Math.min(1, d[p] / R); hgt[p] = Math.sqrt(1 - (1 - t) * (1 - t)); }
+  chamfer34(d, W, H); for (let p = 0; p < N; p++) d[p] = d[p] / 3 * mm;
+  const K = src.colors.length, maxD = new Float32Array(K + 1); for (let p = 0; p < N; p++) if (d[p] > maxD[lab[p]]) maxD[lab[p]] = d[p];
+  const puff = []; for (let k = 1; k <= K; k++) puff[k] = maxD[k] > 1.6;
+  const hgt = new Float32Array(N);
+  for (let p = 0; p < N; p++) { const l = lab[p]; if (!l) continue;
+    if (puff[l]) { const R = Math.min(4.5, maxD[l]), t = Math.min(1, d[p] / R); hgt[p] = 2.6 * Math.sqrt(1 - (1 - t) * (1 - t)); }
+    else { const t = Math.min(1, d[p] / 0.45); hgt[p] = 0.45 * Math.sqrt(1 - (1 - t) * (1 - t)); } }
+  const gxA = new Float32Array(N), gyA = new Float32Array(N); // (cos2θ, sin2θ) of the edge-normal direction, blurred
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const p = y * W + x; if (!lab[p]) continue; const gx = d[p + 1] - d[p - 1], gy = d[p + W] - d[p - W], g2 = gx * gx + gy * gy || 1e-6;
+    gxA[p] = (gx * gx - gy * gy) / g2; gyA[p] = 2 * gx * gy / g2; }
+  blurBox(gxA, W, H, Math.max(1, Math.round(2.6 / mm))); blurBox(gyA, W, H, Math.max(1, Math.round(2.6 / mm)));
   const c = mk(W, H), cx = c.getContext('2d'), id = cx.createImageData(W, H), o = id.data;
-  const L = [-0.55, -0.65, 0.52], ln = Math.hypot(...L); L[0] /= ln; L[1] /= ln; L[2] /= ln;
-  const ang = (+($('#embAngle .on').dataset.a) || 45) * Math.PI / 180, ca = Math.cos(ang), sa = Math.sin(ang);
+  const L = [-0.45, -0.6, 0.66], ln = Math.hypot(...L); L[0] /= ln; L[1] /= ln; L[2] /= ln;
+  const rnd = new Float32Array(N); for (let p = 0; p < N; p++) rnd[p] = Math.random();
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
     const p = y * W + x, l = lab[p]; if (!l) continue;
-    const gx = (hgt[p + 1] - hgt[p - 1]) * 6, gy = (hgt[p + W] - hgt[p - W]) * 6, nl = Math.hypot(gx, gy, 1);
-    const nx = -gx / nl, ny = -gy / nl, nz = 1 / nl, dif = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
-    const spec = Math.pow(Math.max(0, nz * 0.8 + dif * 0.2), 30) * 0.18;
-    const thread = 0.94 + 0.06 * Math.sin((-x * sa + y * ca) * 2.2) + 0.03 * Math.sin((x * ca + y * sa) * 0.9);
-    const lit = Math.min(1.12, 0.3 + 0.72 * dif / L[2]) * thread, col = src.colors[l - 1], i = p * 4;
-    for (let k = 0; k < 3; k++) o[i + k] = Math.max(0, Math.min(255, col[k] * lit + 255 * spec));
-    o[i + 3] = 255;
+    const isPuff = puff[l], amp = (isPuff ? 1.6 : 1.1) / mm;
+    const hx = (hgt[p + 1] - hgt[p - 1]) * 0.5 * amp, hy = (hgt[p + W] - hgt[p - W]) * 0.5 * amp, nl = Math.hypot(hx, hy, 1);
+    const nx = -hx / nl, ny = -hy / nl, nz = 1 / nl;
+    const dif = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
+    const th = 0.5 * Math.atan2(gyA[p], gxA[p]), tx = -Math.sin(th), ty = Math.cos(th); // along the stroke
+    const along = (x * tx + y * ty) * mm, period = isPuff ? 0.42 : 0.5;
+    const ph = (along / period) * Math.PI * 2, thread = 0.9 + 0.1 * Math.cos(ph) * (isPuff ? 1 : 1.4) + (rnd[p] - 0.5) * 0.03;
+    const crest = Math.max(0, Math.cos(ph)) ** 6;
+    const hv = [L[0], L[1], L[2] + 1], hl = Math.hypot(...hv), spec = Math.pow(Math.max(0, (nx * hv[0] + ny * hv[1] + nz * hv[2]) / hl), isPuff ? 28 : 14) * (isPuff ? 0.75 : 0.35);
+    const col = src.colors[l - 1], lum = (col[0] * 0.299 + col[1] * 0.587 + col[2] * 0.114) / 255;
+    const ambient = 0.36, lit = (ambient + (1 - ambient) * Math.min(1.08, dif / L[2])) * thread, i = p * 4;
+    const sheen = spec * (0.35 + 0.5 * lum) * 255 + crest * 0.035 * 255 * dif;
+    for (let k = 0; k < 3; k++) o[i + k] = Math.max(0, Math.min(255, col[k] * lit + sheen));
+    o[i + 3] = !isPuff && d[p] < 0.2 ? Math.round(255 * (0.55 + 0.45 * rnd[p])) : 255;
   }
   cx.putImageData(id, 0, 0);
-  return c;
+  const out = mk(W + 8, H + 8), ox = out.getContext('2d');
+  ox.save(); ox.filter = 'blur(2.5px)'; ox.globalAlpha = 0.55; ox.drawImage(c, 5, 6); ox.globalCompositeOperation = 'source-in'; ox.fillStyle = '#000'; ox.fillRect(0, 0, out.width, out.height); ox.restore();
+  ox.drawImage(c, 4, 4);
+  return out;
 }
 function embHatRender() {
   const hat = HATS[EMB.hat], view = hat.angle && EMB.hatView === 'angle' ? 'angle' : 'front', photo = hatImage(hat.id, view);
@@ -2167,7 +2188,6 @@ function embHatRender() {
     const img = puffImage(src), pxIn = W / HAT_WIDTH_IN, dw = wIn * pxIn, dh = dw * img.height / img.width;
     if (view === 'front') {
       const cx = hat.front.cx * W, cy = hat.front.cy * H;
-      x.save(); x.globalAlpha = 0.5; x.filter = 'blur(5px) brightness(0)'; drawLogoFront(x, img, cx + 3, cy + 6, dw, dh, 1); x.restore();
       drawLogoFront(x, img, cx, cy, dw, dh, 1);
     } else {
       // the quad is the front-panel area (~4.6" wide); place the logo centred in it at the right relative size
@@ -2175,7 +2195,6 @@ function embHatRender() {
       const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
       const sub = (u0, v0, u1, v1) => [lerp(lerp(q[0], q[1], u0), lerp(q[3], q[2], u0), v0), lerp(lerp(q[0], q[1], u1), lerp(q[3], q[2], u1), v0), lerp(lerp(q[0], q[1], u1), lerp(q[3], q[2], u1), v1), lerp(lerp(q[0], q[1], u0), lerp(q[3], q[2], u0), v1)];
       const lq = sub(0.5 - fw / 2, 0.5 - fh / 2, 0.5 + fw / 2, 0.5 + fh / 2);
-      x.save(); x.globalAlpha = 0.5; x.filter = 'blur(4px) brightness(0)'; drawLogoQuad(x, img, lq.map(([a, b]) => [a + 3, b + 5])); x.restore();
       drawLogoQuad(x, img, lq);
     }
   }
