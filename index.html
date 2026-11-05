@@ -55,6 +55,10 @@
   input[type=color]{width:40px;height:36px;border:1px solid var(--line);border-radius:9px;padding:2px;background:#fff}
   .pick{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:10px;padding:3px 10px 3px 3px;font-size:14px;font-weight:600;cursor:pointer;background:#fff}
   .pick input{border:0}
+  .pal{display:flex;flex-wrap:wrap;gap:8px}
+  .pal button{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:#fff;border-radius:99px;padding:4px 11px 4px 4px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}
+  .pal button i{width:26px;height:26px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.2);display:block}
+  .pal button small{color:var(--muted);font-weight:500}
   .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:14px;font-weight:600}
   .toggle small{display:block;font-weight:400;color:var(--muted)}
   .toggle input{width:22px;height:22px;accent-color:var(--accent)}
@@ -157,6 +161,8 @@
           <button class="sw" style="background:#1e40af" data-c="#1e40af" title="Blue"></button>
           <label class="pick"><input type="color" id="color" value="#e3141b"><span>Pick color</span></label>
         </div>
+        <label class="f">Swap a color <small>— choose the new color above, then tap the color to replace</small></label>
+        <div class="pal" id="palette"></div>
         <label class="f">Match tolerance <small id="tolV">60</small></label>
         <input type="range" id="tol" min="5" max="140" value="60">
         <div class="toggle"><div>Change every matching spot<small>Recolor/Erase hits that color everywhere, not just the piece you tap</small></div><input type="checkbox" id="allMatch" checked></div>
@@ -452,8 +458,37 @@ function recolor(d, W, H, region, target, shade) {
   }
 }
 
+/* The main colours in the design (for one-tap colour swapping). */
+function palette(id) {
+  const d = id.data, bins = new Map(); let total = 0;
+  for (let i = 0; i < d.length; i += 16) {
+    if (d[i + 3] < 200) continue; total++;
+    const k = (d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | (d[i + 2] >> 4);
+    const e = bins.get(k) || [0, 0, 0, 0]; e[0]++; e[1] += d[i]; e[2] += d[i + 1]; e[3] += d[i + 2]; bins.set(k, e);
+  }
+  const groups = [];
+  for (const e of [...bins.values()].sort((a, b) => b[0] - a[0])) {
+    const c = [e[1] / e[0], e[2] / e[0], e[3] / e[0]];
+    const g = groups.find(g => Math.max(...g.c.map((v, j) => Math.abs(v - c[j]))) < 45);
+    if (g) g.n += e[0]; else if (groups.length < 40) groups.push({ c, n: e[0] });
+  }
+  return groups.filter(g => g.n / total >= 0.008).sort((a, b) => b.n - a.n).slice(0, 8)
+    .map(g => ({ rgb: g.c.map(Math.round), pct: g.n / total * 100 }));
+}
+function colorRegion(d, W, H, from, tol) {
+  const N = W * H, mask = new Uint8Array(N); let n = 0;
+  for (let p = 0; p < N; p++) { const i = p * 4;
+    if (d[i + 3] >= 16 && Math.abs(d[i] - from[0]) <= tol && Math.abs(d[i + 1] - from[1]) <= tol && Math.abs(d[i + 2] - from[2]) <= tol) { mask[p] = 1; n++; } }
+  return n ? { mask, seed: from, tol } : null;
+}
+
 function applyOp(img, op) {
   const d = img.data, W = img.width, H = img.height;
+  if (op.type === 'swap') {
+    const r = colorRegion(d, W, H, op.from, op.tol);
+    if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
+    return !!r;
+  }
   if (op.type === 'box') {
     const r = boxRegion(d, W, H, op.x0, op.y0, op.x1, op.y1, op.tol);
     if (r) recolor(d, W, H, r, hex2rgb(op.color), op.shade);
@@ -499,6 +534,7 @@ function render() {
   const out = saturate(copyID(S.work), +$('#sat').value / 100);
   $('#view').getContext('2d').putImageData(out, 0, 0);
   updateStat();
+  drawPalette();
 }
 function updateStat() {
   if (!S.W) return;
@@ -744,6 +780,22 @@ $('#outlineBtn').onclick = () => {
   if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
   else toast('No white outline found around the design.');
 };
+function drawPalette() {
+  const el = $('#palette'); if (!el || !S.work) return;
+  const hx = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+  el.innerHTML = '';
+  for (const p of palette(S.work)) {
+    const b = document.createElement('button');
+    b.innerHTML = `<i style="background:${hx(p.rgb)}"></i>${hx(p.rgb).toUpperCase()} <small>${p.pct < 1 ? '<1' : Math.round(p.pct)}%</small>`;
+    b.title = 'Change this color to the selected color';
+    b.onclick = () => {
+      const op = { type: 'swap', from: p.rgb, tol: Math.min(+$('#tol').value, 70), color: S.color, shade: $('#shade').checked }, test = copyID(S.work);
+      if (applyOp(test, op)) { S.ops.push(op); S.work = test; render(); }
+    };
+    el.appendChild(b);
+  }
+  if (!el.children.length) el.innerHTML = '<span class="hint">No solid colors found.</span>';
+}
 function toast(m) { const h = $('#toolHint'); const old = h.innerHTML; h.innerHTML = '<b style="color:#c0262d">' + m + '</b>'; setTimeout(() => h.innerHTML = hints[S.tool] || old, 1800); }
 
 $('#undo').onclick = () => { if (S.ops.length) { S.ops.pop(); replay(); } };
