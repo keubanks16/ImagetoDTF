@@ -92,7 +92,9 @@
   .gsrow .tr{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--muted)}
   .gsrow .tr input{width:20px;height:20px;accent-color:var(--accent)}
   .gsrow .sws{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-  .gsrow .sws .sw{width:30px;height:30px}
+  .gsc{display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:#fff;border-radius:99px;padding:3px 9px 3px 3px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}
+  .gsc i{width:22px;height:22px;border-radius:50%;display:block;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
+  .gsc.on{border-color:var(--accent2);box-shadow:0 0 0 2px var(--accent2)}
   .gsrow input[type=text]{width:96px;padding:8px;border:1px solid var(--line);border-radius:9px;font-size:16px}
   #gsCanvas{display:block;width:100%;height:auto}
 </style>
@@ -263,11 +265,12 @@
       <div class="card">
         <h2>Colors</h2>
         <div class="chips" id="gsPresets" style="margin-bottom:6px">
-          <button data-p="#69C9F5,#14264D,#FFFFFF">Columbia · Navy · White</button>
-          <button data-p="#F5091E,#14264D,#FFFFFF">Red · Navy · White</button>
-          <button data-p="#14264D,#69C9F5,#FFFFFF">Navy · Columbia · White</button>
-          <button data-p="#FFFFFF,#14264D,#69C9F5">White · Navy · Columbia</button>
+          <button data-p="#559BCB,#192649,#FFFFFF">Columbia · Navy · White</button>
+          <button data-p="#192649,#559BCB,#FFFFFF">Navy · Columbia · White</button>
+          <button data-p="#FFFFFF,#192649,#559BCB">White · Navy · Columbia</button>
+          <button data-p="#559BCB,#FFFFFF,#192649">Columbia · White · Navy</button>
         </div>
+        <p class="hint" style="margin:4px 0 6px">Official GS colors only. Need a different color? Download the PNG, then open it in <b>Image → DTF</b> and use <b>Swap a color</b>.</p>
         <div id="gsParts"></div>
       </div>
       <div class="card">
@@ -1502,26 +1505,22 @@ const GS_PARTS = [
   { key: 'inner', label: 'Inner border', def: '#14264D' },
   { key: 'face', label: 'Letters', def: '#FFFFFF' }
 ];
-const GS_SW = [['#69C9F5', 'Columbia blue'], ['#559BCB', 'GS light blue'], ['#14264D', 'Navy'], ['#192649', 'GS navy'], ['#F5091E', 'Red'], ['#FFFFFF', 'White'], ['#111111', 'Black'], ['#D4A017', 'Gold']];
-const gsState = { outer: { c: '#69C9F5', clear: false }, inner: { c: '#14264D', clear: false }, face: { c: '#FFFFFF', clear: false } };
+const GS_SW = [['#559BCB', 'Columbia blue'], ['#192649', 'Dark navy'], ['#FFFFFF', 'White']]; // official GS colours only
+const gsState = { outer: { c: '#559BCB', clear: false }, inner: { c: '#192649', clear: false }, face: { c: '#FFFFFF', clear: false } };
 function gsBuildUI() {
   const box = $('#gsParts'); box.innerHTML = '';
   for (const part of GS_PARTS) {
     const st = gsState[part.key], row = document.createElement('div'); row.className = 'gsrow';
     row.innerHTML = `<div class="top"><span><i></i>${part.label}</span><label class="tr"><input type="checkbox"> Transparent</label></div>
-      <div class="sws">${GS_SW.map(([c, n]) => `<button class="sw" style="background:${c}" data-c="${c}" title="${n}"></button>`).join('')}
-      <label class="pick"><input type="color"><span>Any…</span></label><input type="text" maxlength="7" autocapitalize="characters" placeholder="#HEX"></div>`;
-    const chip = row.querySelector('.top i'), cb = row.querySelector('.tr input'), col = row.querySelector('input[type=color]'), hex = row.querySelector('input[type=text]');
+      <div class="sws">${GS_SW.map(([c, n]) => `<button class="gsc" data-c="${c}"><i style="background:${c}"></i>${n}</button>`).join('')}</div>`;
+    const chip = row.querySelector('.top i'), cb = row.querySelector('.tr input');
     const sync = () => {
       chip.className = st.clear ? 'clear' : ''; chip.style.background = st.clear ? '' : st.c;
-      cb.checked = st.clear; col.value = st.c.toLowerCase(); hex.value = st.c.toUpperCase();
-      row.querySelectorAll('.sw').forEach(b => b.classList.toggle('on', !st.clear && b.dataset.c.toUpperCase() === st.c.toUpperCase()));
+      cb.checked = st.clear;
+      row.querySelectorAll('.gsc').forEach(b => b.classList.toggle('on', !st.clear && b.dataset.c.toUpperCase() === st.c.toUpperCase()));
       row.querySelector('.sws').style.opacity = st.clear ? .4 : 1;
     };
-    row.querySelectorAll('.sw').forEach(b => b.onclick = () => { st.c = b.dataset.c; st.clear = false; sync(); gsRender(); });
-    col.oninput = () => { st.c = col.value.toUpperCase(); st.clear = false; sync(); gsRender(); };
-    hex.oninput = () => { let v = hex.value.trim(); if (!v.startsWith('#')) v = '#' + v;
-      if (/^#[0-9a-f]{6}$/i.test(v)) { st.c = v.toUpperCase(); st.clear = false; sync(); gsRender(); } };
+    row.querySelectorAll('.gsc').forEach(b => b.onclick = () => { st.c = b.dataset.c; st.clear = false; sync(); gsRender(); });
     cb.onchange = () => { st.clear = cb.checked; sync(); gsRender(); };
     part.sync = sync; sync(); box.appendChild(row);
   }
