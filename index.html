@@ -380,7 +380,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 2:40 AM — realistic satin puff rendering</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 3:00 AM — satin outlines in the digitizer, thread colors matched to cap fabric</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -1791,6 +1791,47 @@ function embSource() {
 }
 
 /* 2. tatami fill digitizer */
+/* Satin stitch for narrow shapes (outlines, thin letters): zigzag across the stroke, following the
+   outer edge of each piece. mask: 1 = this colour; returns chains of stitch points (0.1 mm units). */
+function satinChains(mask, W, H, spacing, maxLen) {
+  const N = W * H, comp = new Int32Array(N).fill(-1), st = new Int32Array(N), chains = [];
+  let nComp = 0;
+  for (let p0 = 0; p0 < N; p0++) {
+    if (!mask[p0] || comp[p0] >= 0) continue;
+    const id = nComp++, cm = new Uint8Array(N); let sp = 0; comp[p0] = id; st[sp++] = p0;
+    while (sp) { const p = st[--sp], x = p % W; cm[p] = 1;
+      for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) if (q >= 0 && q < N && mask[q] && comp[q] < 0) { comp[q] = id; st[sp++] = q; } }
+    // outer edge = the longest loop of this piece
+    const loops = traceLoops(cm, W, H); if (!loops.length) continue;
+    let best = null, ba = -1; for (const l of loops) { const a = polyArea(l); if (a > ba) { ba = a; best = l; } }
+    const [xs, ys] = best, n = xs.length; if (n < 3 || ba < 4) continue;
+    // resample the loop every `spacing`
+    const pts = []; let carry = 0;
+    for (let i = 0; i < n; i++) {
+      const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], len = Math.hypot(x1 - x0, y1 - y0); if (!len) continue;
+      let t = carry;
+      while (t < len) { const u = t / len; pts.push([x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, (x1 - x0) / len, (y1 - y0) / len]); t += spacing; }
+      carry = t - len;
+    }
+    const inside = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H && cm[yi * W + xi]; };
+    const chain = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [px, py] = pts[i];
+      // direction along the edge (smoothed over neighbours), inward normal = to the right of travel
+      const a = pts[(i + pts.length - 2) % pts.length], b = pts[(i + 2) % pts.length];
+      let tx = b[0] - a[0], ty = b[1] - a[1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const nx = -ty, ny = tx;
+      let sx = px + nx * 0.6, sy = py + ny * 0.6; if (!inside(sx, sy)) { sx = px - nx * 0.6; sy = py - ny * 0.6; if (!inside(sx, sy)) continue; }
+      const dirx = sx - px > 0 === nx > 0 ? nx : -nx, diry = sx - px > 0 === nx > 0 ? ny : -ny;
+      let L = 0.6, lx = sx, ly = sy;
+      while (L < maxLen) { const qx = px + dirx * (L + 0.5), qy = py + diry * (L + 0.5); if (!inside(qx, qy)) break; lx = qx; ly = qy; L += 0.5; }
+      if (L < 2) continue;
+      chain.push([Math.round(sx), Math.round(sy)], [Math.round(lx), Math.round(ly)]);
+    }
+    if (chain.length >= 4) chains.push(chain);
+  }
+  return chains;
+}
 function embDigitize(src, spacing, angleDeg) {
   const { lab, W, H, colors } = src, N = W * H, cx = W / 2, cy = H / 2;
   const th = angleDeg * Math.PI / 180, c = Math.cos(th), s = Math.sin(th), D = Math.ceil(Math.hypot(W, H) / 2) + 2;
@@ -1802,6 +1843,18 @@ function embDigitize(src, spacing, angleDeg) {
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; if (m[p]) continue;
         if ((x > 0 && m[p - 1]) || (x < W - 1 && m[p + 1]) || (y > 0 && m[p - W]) || (y < H - 1 && m[p + W])) n2[p] = 1; }
       m = n2; }
+    // narrow pieces (under ~3.5 mm across) get satin; the rest is tatami fill
+    const dd = new Float32Array(N); for (let p = 0; p < N; p++) dd[p] = m[p] ? 1e9 : 0;
+    for (let p = 0; p < N; p++) if (m[p]) { const x = p % W, y = (p / W) | 0; if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || !m[p - 1] || !m[p + 1] || !m[p - W] || !m[p + W]) dd[p] = 3; }
+    chamfer34(dd, W, H);
+    const comp = new Int32Array(N).fill(-1), st2 = new Int32Array(N), compMax = [];
+    for (let p0 = 0; p0 < N; p0++) { if (!m[p0] || comp[p0] >= 0) continue; const id = compMax.length; let sp = 0, mx = 0; comp[p0] = id; st2[sp++] = p0;
+      while (sp) { const p = st2[--sp], x = p % W; if (dd[p] > mx) mx = dd[p];
+        for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) if (q >= 0 && q < N && m[q] && comp[q] < 0) { comp[q] = id; st2[sp++] = q; } }
+      compMax.push(mx / 3); }
+    const satinMask = new Uint8Array(N); let anySatin = false;
+    for (let p = 0; p < N; p++) if (m[p] && compMax[comp[p]] <= 18) { satinMask[p] = 1; m[p] = 0; anySatin = true; }
+    const satin = anySatin ? satinChains(satinMask, W, H, Math.max(3, spacing * 0.9), 60).map(ch => ch.map(([x, y]) => [x - Math.round(cx), y - Math.round(cy)])) : [];
     const rows = []; let ri = 0;
     for (let v = -D; v <= D; v += spacing, ri++) {
       const segs = []; let a = null;
@@ -1812,7 +1865,7 @@ function embDigitize(src, spacing, angleDeg) {
       }
       rows.push(segs);
     }
-    const all = rows.flat(); if (!all.length) continue;
+    const all = rows.flat(); if (!all.length && !satin.length) continue;
     const chains = []; let px = null, py = null;
     const toXY = (u, v) => [u * c - v * s, u * s + v * c];
     while (true) {
@@ -1842,7 +1895,7 @@ function embDigitize(src, spacing, angleDeg) {
       const last = pts[pts.length - 1]; px = last[0]; py = last[1];
       chains.push(pts.map(([x, y]) => [Math.round(x), Math.round(y)]));
     }
-    blocks.push({ color: colors[k - 1], chains });
+    blocks.push({ color: colors[k - 1], chains: satin.concat(chains) });
   }
   return blocks;
 }
@@ -2186,7 +2239,9 @@ function embHatRender() {
   const x = cv.getContext('2d'); x.clearRect(0, 0, W, H); x.imageSmoothingQuality = 'high'; x.drawImage(photo, 0, 0, W, H);
   const src = EMB.lastSrc, wIn = +$('#embW').value || 3.5;
   if (src) {
-    const img = puffImage(src), pxIn = W / HAT_WIDTH_IN, dw = wIn * pxIn, dh = dw * img.height / img.width;
+    const HAT_THREAD = [[[0x55, 0x9b, 0xcb], [0x7a, 0xa5, 0xd4]], [[0x69, 0xc9, 0xf5], [0x7a, 0xa5, 0xd4]], [[0x19, 0x26, 0x49], [0x1f, 0x25, 0x3e]], [[0x14, 0x26, 0x4d], [0x1f, 0x25, 0x3e]]]; // GS colour → thread as it looks against The Game's fabric
+    const srcHat = Object.assign({}, src, { colors: src.colors.map(c => { for (const [g, t] of HAT_THREAD) if (Math.abs(c[0] - g[0]) + Math.abs(c[1] - g[1]) + Math.abs(c[2] - g[2]) < 60) return t; return c; }) });
+    const img = puffImage(srcHat), pxIn = W / HAT_WIDTH_IN, dw = wIn * pxIn, dh = dw * img.height / img.width;
     if (view === 'front') {
       const cx = hat.front.cx * W, cy = hat.front.cy * H;
       drawLogoFront(x, img, cx, cy, dw, dh, 0);
