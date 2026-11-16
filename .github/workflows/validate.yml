@@ -1,0 +1,37 @@
+name: Validate GS DTF web and iOS assets
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate JavaScript, configuration, and shell scripts
+        run: |
+          node --check --input-type=commonjs < <(sed -n '/^<script>$/,/^<\/script>$/p' index.html | sed '1d;$d')
+          node -e "const c=require('./capacitor.config.json'); if(c.webDir!=='www')process.exit(1)"
+          sh -n scripts/build-web.sh
+          python3 -m py_compile scripts/asc_submit.py
+        shell: bash
+      - name: Verify iOS bundle includes all local assets
+        run: |
+          sh scripts/build-web.sh
+          test -s www/index.html
+          test -s www/logo.png
+          test -s www/icon.png
+          test -s www/privacy.html
+          for src in hats/*-front.webp; do test -s "www/$src"; done
+          node - <<'NODE'
+          const fs=require('fs'),html=fs.readFileSync('www/index.html','utf8');
+          for(const id of ['file','view','export','gsPng','gsSvg','embCanvas','embHats']) {
+            if (!html.includes('id="'+id+'"')) throw new Error('Missing required element: '+id);
+          }
+          NODE

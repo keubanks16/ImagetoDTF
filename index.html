@@ -412,7 +412,8 @@ function loadFile(file) {
     const c = mk(w, h), x = c.getContext('2d', { willReadFrequently: true });
     x.drawImage(img, 0, 0, w, h);
     S.orig = x.getImageData(0, 0, w, h); S.W = w; S.H = h; S.ops = [];
-    S.name = file.name.replace(/\.[^.]+$/, '') || 'design';
+    // Safe for filenames and for the status messages rendered as HTML.
+    S.name = (file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80) || 'design');
     URL.revokeObjectURL(url);
     $('#view').width = w; $('#view').height = h;
     drop.classList.add('hidden'); $('#editor').classList.remove('hidden');
@@ -422,7 +423,7 @@ function loadFile(file) {
       $('#logoMode').checked = lm; $('#logoOpts').classList.toggle('hidden', !lm); $('#svgBtn').classList.toggle('hidden', !lm); }
     rebuildBase(); busy(false);
   };
-  img.onerror = () => { busy(false); alert('Could not open that image. Try a PNG or JPG.'); };
+  img.onerror = () => { URL.revokeObjectURL(url); busy(false); alert('Could not open that image. Try a PNG or JPG.'); };
   img.src = url;
 }
 
@@ -893,13 +894,15 @@ function saturate(id, amt) {
 }
 let renderSeq = 0;
 function render() {
+  // Invalidate any outstanding asynchronous logo preview before switching modes.
+  const seq = ++renderSeq;
   const out = saturate(copyID(S.work), +$('#sat').value / 100);
   const v = $('#view'), vx = v.getContext('2d');
   updateStat();
   drawPalette();
   if (!$('#logoMode').checked) { vx.putImageData(out, 0, 0); return; }
   // preview the cleaned edges (at screen-friendly size so it stays quick)
-  const seq = ++renderSeq, k = Math.min(1, 1400 / Math.max(S.W, S.H)), pw = Math.round(S.W * k), ph = Math.round(S.H * k);
+  const k = Math.min(1, 1400 / Math.max(S.W, S.H)), pw = Math.round(S.W * k), ph = Math.round(S.H * k);
   vectorLogo(out, S.W, S.H, logoColors(out), +$('#smooth').value).then(sm => {
     if (seq !== renderSeq) return;
     vx.putImageData(sm, 0, 0);
@@ -1520,6 +1523,7 @@ async function buildPNG() {
   if ($('#hard').checked) { const d = id.data; for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 128 ? 255 : 0; }
   ox.putImageData(id, 0, 0);
   const blob = await new Promise(r => out.toBlob(r, 'image/png'));
+  if (!blob) throw new Error('PNG export failed. Try a smaller print size.');
   const withDpi = setDpi(new Uint8Array(await blob.arrayBuffer()), 300);
   return { blob: withDpi, tw, th, inW };
 }
@@ -1710,7 +1714,9 @@ $('#gsPng').onclick = async () => {
     busy(true, 'Building your GS logo…'); await tick();
     const { b, tw, th, k } = gsSize(), c = mk(tw, th), x = c.getContext('2d');
     gsDraw(x, k, b[0], b[1]);
-    const blob = setDpi(new Uint8Array(await (await new Promise(r => c.toBlob(r, 'image/png'))).arrayBuffer()), 300);
+    const pngBlob = await new Promise(r => c.toBlob(r, 'image/png'));
+    if (!pngBlob) throw new Error('GS logo export failed. Try a smaller print size.');
+    const blob = setDpi(new Uint8Array(await pngBlob.arrayBuffer()), 300);
     const fname = gsName('png'); busy(false); await gsSave(blob, fname);
     $('#gsDone').innerHTML = `Saved <b>${fname}</b> — ${tw} × ${th} px, 300 DPI, transparent background.`;
   } catch (e) { alert(e.message || e); } finally { busy(false); }
@@ -2118,9 +2124,19 @@ async function embBuild() {
     const spacing = +($('#embDensity .on').dataset.d), ang = +($('#embAngle .on').dataset.a);
     const blocks = embDigitize(src, spacing, ang);
     EMB.colors = blocks.map(b => b.color); EMB.stream = embStream(blocks); EMB.W = src.W; EMB.H = src.H; EMB.lastSrc = src;
+    if (!EMB.colors.length || !EMB.stream.some(s => s[2] === 'S')) {
+      EMB.stream = null;
+      $('#embStat').textContent = 'No stitchable areas found. Choose another design or adjust its colors.';
+      const cv = $('#embCanvas'); cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+      return;
+    }
     if (!$('#embH').value) embSyncSizes('w');
     embPreview();
     if (EMB.view === 'hat') embHatRender();
+  } catch (e) {
+    EMB.stream = null;
+    $('#embStat').textContent = 'Embroidery digitizing failed: ' + (e.message || e);
+    console.error(e);
   } finally { busy(false); }
 }
 function embPreview() {
