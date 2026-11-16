@@ -412,7 +412,8 @@ function loadFile(file) {
     const c = mk(w, h), x = c.getContext('2d', { willReadFrequently: true });
     x.drawImage(img, 0, 0, w, h);
     S.orig = x.getImageData(0, 0, w, h); S.W = w; S.H = h; S.ops = [];
-    S.name = file.name.replace(/\.[^.]+$/, '') || 'design';
+    // Safe for filenames and for the status messages rendered as HTML.
+    S.name = (file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80) || 'design');
     URL.revokeObjectURL(url);
     $('#view').width = w; $('#view').height = h;
     drop.classList.add('hidden'); $('#editor').classList.remove('hidden');
