@@ -1839,7 +1839,7 @@ const EMB_SATIN_MAX = 25, EMB_DOT_MAX = 150, EMB_LONG = 26; // px at 0.1 mm: wid
 /* Satin for the narrow strokes of an uploaded design: the needle zigzags straight across the stroke from one
    edge to the other, following the outline, so the stitch width follows the shape (tapered swooshes, rings).
    mask: 1 = this colour; returns chains of stitch points (0.1 mm units). */
-function satinChains(mask, W, H, spacing, maxLen) {
+function satinChains(mask, W, H, spacing, maxLen, busy) {
   const N = W * H, comp = new Int32Array(N).fill(-1), st = new Int32Array(N), chains = [];
   // distance to the outside of the mask (px), for stroke width
   const dist = new Float32Array(N); for (let p = 0; p < N; p++) dist[p] = mask[p] ? 1e9 : 0;
@@ -1858,9 +1858,15 @@ function satinChains(mask, W, H, spacing, maxLen) {
     if (px.length < 20) continue;
     for (const p of px) cm[p] = 1;
     const maxW = Math.min(maxLen, 2.4 * (mx / 3) + 4), PULL = 0.8; // widest stitch allowed for this piece
-    const loops = traceLoops(cm, W, H).map(l => ({ l, a: polyArea(l) })).filter(o => o.a >= 4).sort((u, v) => v.a - u.a);
-    for (const { l } of loops) {
-      const [xs, ys] = simplifyLoop(l, 1.4), n = xs.length; if (n < 3) continue;
+    const loops = traceLoops(cm, W, H).map(l => ({ l, a: polyArea(l) })).filter(o => o.a >= 4).sort((u, v) => v.a - u.a).map(o => simplifyLoop(o.l, 1.4));
+    if (busy) { // lots of corners for its length (serif lettering, fiddly shapes): satin round every corner turns to a tangle, so hand the piece back for plain zigzag rows
+      let corners = 0, len = 0;
+      for (const [xs, ys] of loops) for (let i = 0, n = xs.length; i < n; i++) { const ax = xs[i] - xs[(i + n - 1) % n], ay = ys[i] - ys[(i + n - 1) % n], bx = xs[(i + 1) % n] - xs[i], by = ys[(i + 1) % n] - ys[i];
+        len += Math.hypot(bx, by); if (Math.abs(Math.atan2(ax * by - ay * bx, ax * bx + ay * by)) > 0.6) corners++; }
+      if (corners > 8 && corners / (len / (2 * mx / 3)) > 1) /* more than one corner per stroke-width of outline */ { for (const p of px) { busy[p] = 1; cm[p] = 0; } continue; }
+    }
+    for (const [xs, ys] of loops) {
+      const n = xs.length; if (n < 3) continue;
       const E = []; for (let i = 0; i < n; i++) { const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], L = Math.hypot(x1 - x0, y1 - y0) || 1; E.push({ x0, y0, tx: (x1 - x0) / L, ty: (y1 - y0) / L, ang: Math.atan2((x1 - x0) / L, -(y1 - y0) / L), L }); } // ang = direction of the inward normal
       let chain = [], side = 1, lastLen = 0, lastAng = 0, first = null, over = 0; const pending = [], loop0 = serial;
       const flush = () => { if (chain.length >= 2) chains.push(chain); chain = []; lastLen = 0; over = 0; };
@@ -2062,7 +2068,8 @@ function embDigitize(src, spacing, angleDeg) {
     let chains = [], mk2;
     if (gs && (mk2 = part(1))) chains = centre(satinOutline(mk2, W, H, Math.max(3, spacing * 0.9), 60));
     if ((mk2 = part(0))) chains = chains.concat(fillChains(mk2, W, H, spacing, angleDeg, 35));
-    if (!gs && (mk2 = part(1))) chains = chains.concat(centre(satinChains(mk2, W, H, zz, 70)));
+    if (!gs && (mk2 = part(1))) { const busy = new Uint8Array(N); chains = chains.concat(centre(satinChains(mk2, W, H, zz, 70, busy)));
+      if (busy.some(v => v)) chains = chains.concat(fillChains(busy, W, H, zz, angleDeg, 0)); }
     if ((mk2 = part(2))) chains = chains.concat(fillChains(mk2, W, H, zz, 0, 0));
     if ((mk2 = part(3))) chains = chains.concat(fillChains(mk2, W, H, zz, 90, 0));
     if ((mk2 = part(4))) chains = chains.concat(fillChains(mk2, W, H, zz, angleDeg, 0));
