@@ -334,7 +334,7 @@
           <p class="hint" id="embHatNote"></p>
         </div>
         <div class="stat" id="embStat">—</div>
-        <p class="hint">Stitch preview: every line is a stitch. Auto-digitized with tatami fill — always sew a test on scrap fabric before a full run.</p>
+        <p class="hint">Stitch preview: every line is a stitch. Auto-digitized: tatami fill for big areas, satin for outlines and small details — always sew a test on scrap fabric before a full run.</p>
       </div>
     </div>
     <div>
@@ -380,7 +380,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 5:20 AM — digitizer-style satin (centerline zigzag, mitered corners)</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 25, 10:05 AM — cleaner embroidery for uploaded designs (true colors on edges, details sewn on top, smoother satin)</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -1783,24 +1783,147 @@ function embSource() {
     const x = cv.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(t, 0, 0, w, h);
     colors = logoColors(S.work).slice(0, 8);
   }
-  const W = cv.width, H = cv.height, d = cv.getContext('2d').getImageData(0, 0, W, H).data, lab = new Uint8Array(W * H), area = new Array(colors.length).fill(0);
-  for (let p = 0; p < W * H; p++) { const i = p * 4; if (d[i + 3] < 128) continue;
-    let bk = 0, bd = 1e9; colors.forEach((c, k) => { const dd = (d[i] - c[0]) ** 2 + (d[i + 1] - c[1]) ** 2 + (d[i + 2] - c[2]) ** 2; if (dd < bd) { bd = dd; bk = k; } });
-    lab[p] = bk + 1; area[bk]++; }
-  if (EMB.src === 'upload') { // sew big areas first, small details on top
-    const ord = colors.map((c, k) => k).sort((a, b) => area[b] - area[a]), map = new Uint8Array(colors.length + 1);
-    ord.forEach((k, i) => map[k + 1] = i + 1); for (let p = 0; p < W * H; p++) lab[p] = map[lab[p]];
-    colors = ord.map(k => colors[k]);
-  }
+  const W = cv.width, H = cv.height, d = cv.getContext('2d').getImageData(0, 0, W, H).data, lab = embLabel(d, W, H, colors);
+  if (EMB.src === 'upload') colors = embLayers(lab, W, H, colors); // sew big outer areas first, details that sit on top of them after
   const keep = colors.map((c, k) => k).filter(k => lab.some(v => v === k + 1));
-  return { lab, W, H, colors, used: keep };
+  return { lab, W, H, colors, used: keep, gs: EMB.src === 'gs' };
 }
 
-/* 2. tatami fill digitizer */
-/* Satin stitch for narrow shapes (outlines, thin letters), digitizer-style: each piece's edges are traced
+/* Snap every solid pixel to one thread colour. Pixels that match no colour well are the soft blended
+   edges between two colours; snapping those to the "nearest" colour can pick a third, unrelated thread
+   (navy fading into white lands closest to green), so they take the colour of the solid area next to them. */
+function embLabel(d, W, H, colors) {
+  const N = W * H, lab = new Uint8Array(N), soft = []; let solid = 0;
+  const near = i => { let bk = 0, bd = 1e9; colors.forEach((c, k) => { const dd = (d[i] - c[0]) ** 2 + (d[i + 1] - c[1]) ** 2 + (d[i + 2] - c[2]) ** 2; if (dd < bd) { bd = dd; bk = k; } }); return [bk + 1, bd]; };
+  for (let p = 0; p < N; p++) { if (d[p * 4 + 3] < 128) continue; const [k, bd] = near(p * 4); solid++; if (bd > 1800) { lab[p] = 255; soft.push(p); } else lab[p] = k; }
+  if (soft.length > solid * 0.35) { for (const p of soft) lab[p] = near(p * 4)[0]; return lab; } // shaded art, not flat colours: plain nearest colour
+  let left = soft;
+  for (let round = 0; round < 8 && left.length; round++) { const next = [], set = [];
+    for (const p of left) { const x = p % W; let v = 0;
+      for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) if (q >= 0 && q < N && lab[q] && lab[q] !== 255) { v = lab[q]; break; }
+      if (v) set.push(p, v); else next.push(p); }
+    for (let i = 0; i < set.length; i += 2) lab[set[i]] = set[i + 1];
+    left = next; }
+  for (const p of left) lab[p] = near(p * 4)[0];
+  return lab;
+}
+/* Sewing order for an uploaded design. Every separate patch of colour gets a depth: 0 if it touches
+   the fabric, 1 if it sits inside a depth-0 patch, and so on. Lower depths sew first, so details that
+   sit on top of another colour (dots on a ball, the inside of a letter) are stitched after it, even
+   when that means coming back to a thread colour a second time. Returns the label map renumbered per
+   sewing step, with the colour of each step. */
+function embLayers(lab, W, H, colors) {
+  const N = W * H, comp = new Int32Array(N).fill(-1), st = new Int32Array(N), cLab = [], cArea = [], depth = [], q = [];
+  for (let p0 = 0; p0 < N; p0++) { if (!lab[p0] || comp[p0] >= 0) continue; const id = cLab.length, L = lab[p0]; let sp = 0, a = 0, edge = false; comp[p0] = id; st[sp++] = p0;
+    while (sp) { const p = st[--sp], x = p % W, y = (p / W) | 0; a++;
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) edge = true;
+      for (const r of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, y > 0 ? p - W : -1, y < H - 1 ? p + W : -1]) { if (r < 0) continue; if (!lab[r]) edge = true; else if (lab[r] === L && comp[r] < 0) { comp[r] = id; st[sp++] = r; } } }
+    cLab.push(L); cArea.push(a); depth.push(edge ? 0 : -1); if (edge) q.push(id); }
+  const nC = cLab.length, adj = Array.from({ length: nC }, () => new Set());
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x, a = comp[p]; if (a < 0) continue;
+    if (x < W - 1) { const b = comp[p + 1]; if (b >= 0 && b !== a) { adj[a].add(b); adj[b].add(a); } }
+    if (y < H - 1) { const b = comp[p + W]; if (b >= 0 && b !== a) { adj[a].add(b); adj[b].add(a); } } }
+  for (let i = 0; i < q.length; i++) for (const b of adj[q[i]]) if (depth[b] < 0) { depth[b] = Math.min(3, depth[q[i]] + 1); q.push(b); }
+  const steps = [], stepOf = new Map(); let prev = -1;
+  for (let dp = 0; dp <= 3; dp++) {
+    const area = new Map(); for (let i = 0; i < nC; i++) if (Math.max(0, depth[i]) === dp) area.set(cLab[i], (area.get(cLab[i]) || 0) + cArea[i]);
+    const order = [...area.keys()].sort((a, b) => (b === prev) - (a === prev) || area.get(b) - area.get(a)); // carry on with the thread that's already on the needle
+    for (const L of order) { if (L !== prev) { steps.push(L); prev = L; } stepOf.set(dp * 256 + L, steps.length); }
+  }
+  for (let p = 0; p < N; p++) if (lab[p]) lab[p] = stepOf.get(Math.max(0, depth[comp[p]]) * 256 + lab[p]);
+  return steps.map(L => colors[L - 1]);
+}
+
+/* 2. digitizer */
+const EMB_SATIN_MAX = 25, EMB_DOT_MAX = 150, EMB_LONG = 26; // px at 0.1 mm: widest half-stroke that still gets satin; largest piece sewn as a simple zigzag
+/* Satin for the narrow strokes of an uploaded design: the needle zigzags straight across the stroke from one
+   edge to the other, following the outline, so the stitch width follows the shape (tapered swooshes, rings).
+   mask: 1 = this colour; returns chains of stitch points (0.1 mm units). */
+function satinChains(mask, W, H, spacing, maxLen, busy) {
+  const N = W * H, comp = new Int32Array(N).fill(-1), st = new Int32Array(N), chains = [];
+  // distance to the outside of the mask (px), for stroke width
+  const dist = new Float32Array(N); for (let p = 0; p < N; p++) dist[p] = mask[p] ? 1e9 : 0;
+  for (let p = 0; p < N; p++) if (mask[p]) { const x = p % W, y = (p / W) | 0; if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || !mask[p - 1] || !mask[p + 1] || !mask[p - W] || !mask[p + W]) dist[p] = 3; }
+  chamfer34(dist, W, H);
+  const covered = new Int32Array(N), cm = new Uint8Array(N), RC = 2; let serial = 0;
+  const mark = (x, y, n, rc) => { const x0 = Math.floor(x), y0 = Math.floor(y); for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) { const xi = x0 + dx, yi = y0 + dy; if (xi >= 0 && yi >= 0 && xi < W && yi < H) covered[yi * W + xi] = n; } };
+  const covBy = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H ? covered[yi * W + xi] : 0; };
+  const inMask = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H && cm[yi * W + xi]; };
+  let nComp = 0;
+  for (let p0 = 0; p0 < N; p0++) {
+    if (!mask[p0] || comp[p0] >= 0) continue;
+    const id = nComp++, px = []; let sp = 0, mx = 0; comp[p0] = id; st[sp++] = p0;
+    while (sp) { const p = st[--sp], x = p % W; px.push(p); if (dist[p] > mx) mx = dist[p];
+      for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) if (q >= 0 && q < N && mask[q] && comp[q] < 0) { comp[q] = id; st[sp++] = q; } }
+    if (px.length < 20) continue;
+    for (const p of px) cm[p] = 1;
+    const maxW = Math.min(maxLen, 2.4 * (mx / 3) + 4), PULL = 0.8; // widest stitch allowed for this piece
+    const loops = traceLoops(cm, W, H).map(l => ({ l, a: polyArea(l) })).filter(o => o.a >= 4).sort((u, v) => v.a - u.a).map(o => simplifyLoop(o.l, 1.4));
+    if (busy) { // lots of corners for its length (serif lettering, fiddly shapes): satin round every corner turns to a tangle, so hand the piece back for plain zigzag rows
+      let corners = 0, len = 0;
+      for (const [xs, ys] of loops) for (let i = 0, n = xs.length; i < n; i++) { const ax = xs[i] - xs[(i + n - 1) % n], ay = ys[i] - ys[(i + n - 1) % n], bx = xs[(i + 1) % n] - xs[i], by = ys[(i + 1) % n] - ys[i];
+        len += Math.hypot(bx, by); if (Math.abs(Math.atan2(ax * by - ay * bx, ax * bx + ay * by)) > 0.6) corners++; }
+      if (corners > 8 && corners / (len / (2 * mx / 3)) > 1) /* more than one corner per stroke-width of outline */ { for (const p of px) { busy[p] = 1; cm[p] = 0; } continue; }
+    }
+    for (const [xs, ys] of loops) {
+      const n = xs.length; if (n < 3) continue;
+      const E = []; for (let i = 0; i < n; i++) { const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], L = Math.hypot(x1 - x0, y1 - y0) || 1; E.push({ x0, y0, tx: (x1 - x0) / L, ty: (y1 - y0) / L, ang: Math.atan2((x1 - x0) / L, -(y1 - y0) / L), L }); } // ang = direction of the inward normal
+      let chain = [], side = 1, lastLen = 0, lastAng = 0, first = null, over = 0; const pending = [], loop0 = serial;
+      const flush = () => { if (chain.length >= 2) chains.push(chain); chain = []; lastLen = 0; over = 0; };
+      const markNext = () => { const x = pending.shift(), y = pending.shift(), n = pending.shift(); mark(x, y, n, n - loop0 <= 3 ? 0 : RC); }; // the first stitches of an outline claim less room, so the stitching coming back round meets them without a gap
+      // one stitch straight across the shape, starting on the edge at (px,py) and heading inward at angle a
+      // a stitch across a stroke passes through its middle; one that only skims along an edge (at the blunt end of a stroke) is left out
+      const skims = (bx, by, ax, ay, t) => { const gx = Math.floor(bx + ax * t / 2), gy = Math.floor(by + ay * t / 2); return (gx >= 0 && gy >= 0 && gx < W && gy < H ? dist[gy * W + gx] / 3 : 0) < 0.15 * t; };
+      const reach = (bx, by, a) => { const ax = Math.cos(a), ay = Math.sin(a); let t = 0.5; while (t < 4 && !inMask(bx + ax * t, by + ay * t)) t += 0.5; const t1 = t; while (t - t1 <= maxW + 1 && inMask(bx + ax * t, by + ay * t)) t += 0.5; return skims(bx + ax * t1, by + ay * t1, ax, ay, t - t1) ? 0 : t - t1; };
+      const cast = (bx, by, a, fresh) => {
+        const ax = Math.cos(a), ay = Math.sin(a);
+        let t0 = 0.5; while (t0 < 3.5 && !inMask(bx + ax * t0, by + ay * t0)) t0 += 0.5; // the smoothed outline can sit a hair off the real edge
+        if (t0 >= 3.5) { flush(); return; }
+        bx += ax * (t0 - 0.5); by += ay * (t0 - 0.5);
+        let t = 0.5; while (t <= maxW + 1 && inMask(bx + ax * t, by + ay * t)) t += 0.5;
+        let da = a - lastAng; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        if (skims(bx, by, ax, ay, t) && !(lastLen && Math.abs(t - lastLen) <= 0.25 * lastLen + 2 && Math.abs(da) < 0.3)) { flush(); return; }
+        if (t > maxW || (lastLen && t > 1.8 * lastLen + 4)) { // running along the stroke instead of across it: a junction or the end of a stroke
+          if (lastLen && !fresh && Math.abs(da) < 0.5) t = lastLen; else { flush(); return; } }
+        if (t < 3) { flush(); return; }
+        const mxp = bx + ax * t / 2, myp = by + ay * t / 2;
+        const cb = covBy(mxp, myp); // already sewn from the other side? (the first few stitches of this same outline don't count, so the ends of a ring meet)
+        if (cb && !(cb > loop0 && cb <= loop0 + 8 && first && Math.hypot(bx - first[0], by - first[1]) < 6)) { if (chain.length && over < 2) over++; else { flush(); return; } } else over = 0; // run two stitches into what's already sewn so the two meet with no slit
+        if (!first) first = [bx, by];
+        const k = side > 0 ? -PULL : t + PULL;
+        chain.push([Math.round(bx + ax * k), Math.round(by + ay * k)]); side = -side; lastLen = t; lastAng = a;
+        pending.push(mxp, myp, ++serial); if (pending.length > 18) markNext();
+      };
+      const turn = i => { let d = E[i % n].ang - E[(i + n - 1) % n].ang; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
+      let capEnd = -1; // while i <= capEnd the outline is going round the end of a stroke
+      for (let i = 0; i < n; i++) {
+        const e0 = E[(i + n - 1) % n], e = E[i];
+        let da = turn(i);
+        if (i > capEnd && Math.abs(da) > 0.25) { // does the outline double back within about a stroke width? then this is the end (or tip) of a stroke, not a bend: sew square up to it and nothing round it
+          const lim = 1.5 * (lastLen || 2 * mx / 3); let sum = da, arc = 0, j = i;
+          while (Math.abs(sum) <= 2.4 && j - i < n - 1) { arc += E[j % n].L; if (arc > lim) break; j++; sum += turn(j); }
+          if (Math.abs(sum) > 2.4) { while (j - i < n - 1 && E[j % n].L < 5 && turn(j + 1) * sum > 0) j++; capEnd = j; flush(); } // (a rounded corner is several short edges: take them all)
+        }
+        if (i <= capEnd) { if (i < capEnd) continue; da = 9; } // skip the edges round the end; carry on after its last corner with no fan
+        const w1 = reach(e.x0 + e.tx * Math.min(3, e.L / 2), e.y0 + e.ty * Math.min(3, e.L / 2), e.ang);
+        if (da !== 9 && Math.abs(da) > 0.05 && Math.abs(da) < 1.75 && lastLen && w1 >= 3 && w1 <= maxW && w1 <= 1.8 * lastLen + 4) { // corner with a stroke on both sides: fan the stitches round it (not round the blunt end or sharp tip of a stroke)
+          const steps = Math.min(16, Math.ceil(Math.abs(da) * Math.max(lastLen, 6) / spacing));
+          for (let k = 1; k < steps; k++) cast(e.x0, e.y0, e0.ang + da * k / steps, false);
+        } else if (Math.abs(da) > 0.3) while (pending.length) markNext(); // new direction: don't sew back over what was just laid
+        for (let d = 0, f = true; d < e.L; d += spacing, f = false) cast(e.x0 + e.tx * d, e.y0 + e.ty * d, e.ang, f && Math.abs(da) > 0.3);
+      }
+      flush();
+      while (pending.length) markNext();
+    }
+    for (const p of px) cm[p] = 0;
+  }
+  return chains;
+}
+/* GS Logo outlines (even-width strokes with square corners). */
+/* Satin stitch for even-width outlines, digitizer-style: each piece's edges are traced
    into clean polygons, offset to the stroke's centreline, and a zigzag column is laid across it with
    mitred fan corners. mask: 1 = this colour; returns chains of stitch points (0.1 mm units). */
-function satinChains(mask, W, H, spacing, maxLen) {
+function satinOutline(mask, W, H, spacing, maxLen) {
   const N = W * H, comp = new Int32Array(N).fill(-1), st = new Int32Array(N), chains = [];
   // distance to the outside of the mask (px), for stroke width
   const dist = new Float32Array(N); for (let p = 0; p < N; p++) dist[p] = mask[p] ? 1e9 : 0;
@@ -1863,71 +1986,95 @@ function satinChains(mask, W, H, spacing, maxLen) {
     }
   }
   return chains;
+}/* Fill a mask with rows of stitches at an angle. L = longest stitch (rows are split into staggered
+   stitches of that length); L = 0 leaves each row as one stitch across the shape (satin-style zigzag).
+   Rows are chained into continuous runs. Returns chains of points centred on the design. */
+function fillChains(m, W, H, spacing, angleDeg, L) {
+  const cx = W / 2, cy = H / 2, th = angleDeg * Math.PI / 180, c = Math.cos(th), s = Math.sin(th), D = Math.ceil(Math.hypot(W, H) / 2) + 2;
+  const rows = []; let ri = 0;
+  for (let v = -D; v <= D; v += spacing, ri++) {
+    const segs = []; let a = null;
+    for (let u = -D; u <= D; u++) {
+      const x = Math.round(cx + u * c - v * s), y = Math.round(cy + u * s + v * c);
+      const on = x >= 0 && y >= 0 && x < W && y < H && m[y * W + x];
+      if (on && a === null) a = u; else if (!on && a !== null) { if (u - 1 - a >= 3) segs.push({ r: ri, v, a, b: u - 1, used: false }); a = null; }
+    }
+    rows.push(segs);
+  }
+  const all = rows.flat(), chains = []; let px = null, py = null;
+  const toXY = (u, v) => [u * c - v * s, u * s + v * c];
+  while (all.length) {
+    // next run: the unused row-segment end closest to where the needle is
+    let best = null, bd = Infinity, bdir = 1;
+    for (const g of all) { if (g.used) continue;
+      if (px === null) { best = g; bdir = 1; break; }
+      for (const [uu, dir] of [[g.a, 1], [g.b, -1]]) { const [x, y] = toXY(uu, g.v), dd = (x - px) ** 2 + (y - py) ** 2; if (dd < bd) { bd = dd; best = g; bdir = dir; } } }
+    if (!best) break;
+    const chain = []; let cur = best, dir = bdir;
+    while (cur) {
+      cur.used = true; chain.push([cur, dir]);
+      const exit = dir > 0 ? cur.b : cur.a, nr = rows[cur.r + 1]; let nx = null, nd = Infinity;
+      if (nr) for (const g of nr) { if (g.used || g.a > cur.b || g.b < cur.a) continue;
+        const st = -dir > 0 ? g.a : g.b, dd = Math.abs(st - exit); if (dd < nd && dd <= 30) { nd = dd; nx = g; } }
+      cur = nx; dir = -dir;
+    }
+    const pts = [];
+    for (const [g, dir] of chain) {
+      const from = dir > 0 ? g.a : g.b, to = dir > 0 ? g.b : g.a;
+      pts.push(toXY(from, g.v));
+      if (L > 0) { const off = (g.r % 3) * L / 3;
+        let u = dir > 0 ? Math.ceil((from - off) / L) * L + off : Math.floor((from - off) / L) * L + off;
+        for (; dir > 0 ? u < to : u > to; u += dir * L) if (Math.abs(u - from) > 8 && Math.abs(to - u) > 8) pts.push(toXY(u, g.v));
+      } else { const parts = Math.ceil(Math.abs(to - from) / 70); for (let k = 1; k < parts; k++) pts.push(toXY(from + (to - from) * k / parts, g.v)); }
+      pts.push(toXY(to, g.v));
+    }
+    const last = pts[pts.length - 1]; px = last[0]; py = last[1];
+    chains.push(pts.map(([x, y]) => [Math.round(x), Math.round(y)]));
+  }
+  return chains;
 }
 function embDigitize(src, spacing, angleDeg) {
-  const { lab, W, H, colors } = src, N = W * H, cx = W / 2, cy = H / 2;
-  const th = angleDeg * Math.PI / 180, c = Math.cos(th), s = Math.sin(th), D = Math.ceil(Math.hypot(W, H) / 2) + 2;
-  const L = 35, blocks = [];
+  const { lab, W, H, colors } = src, N = W * H, cx = W / 2, cy = H / 2, blocks = [], gs = !!src.gs; // gs: the built-in GS Logo keeps its own outline satin
   for (let k = 1; k <= colors.length; k++) {
     // mask grown by 0.2 mm so neighbouring colours overlap a touch (no gaps when the fabric pulls)
-    let m = new Uint8Array(N); for (let p = 0; p < N; p++) if (lab[p] === k) m[p] = 1;
+    let m = new Uint8Array(N), any = false; for (let p = 0; p < N; p++) if (lab[p] === k) { m[p] = 1; any = true; }
+    if (!any) continue;
     for (let it = 0; it < 2; it++) { const n2 = m.slice();
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = y * W + x; if (m[p]) continue;
         if ((x > 0 && m[p - 1]) || (x < W - 1 && m[p + 1]) || (y > 0 && m[p - W]) || (y < H - 1 && m[p + W])) n2[p] = 1; }
       m = n2; }
-    // narrow pieces (under ~3.5 mm across) get satin; the rest is tatami fill
+    // Each piece gets the stitch that suits it: wide areas → tatami fill; long narrow strokes (outlines,
+    // swooshes, under ~5 mm across) → satin that follows the stroke; small pieces (dots, small letters)
+    // → a simple zigzag straight across.
     const dd = new Float32Array(N); for (let p = 0; p < N; p++) dd[p] = m[p] ? 1e9 : 0;
     for (let p = 0; p < N; p++) if (m[p]) { const x = p % W, y = (p / W) | 0; if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || !m[p - 1] || !m[p + 1] || !m[p - W] || !m[p + W]) dd[p] = 3; }
     chamfer34(dd, W, H);
-    const comp = new Int32Array(N).fill(-1), st2 = new Int32Array(N), compMax = [];
-    for (let p0 = 0; p0 < N; p0++) { if (!m[p0] || comp[p0] >= 0) continue; const id = compMax.length; let sp = 0, mx = 0; comp[p0] = id; st2[sp++] = p0;
-      while (sp) { const p = st2[--sp], x = p % W; if (dd[p] > mx) mx = dd[p];
+    const comp = new Int32Array(N).fill(-1), st2 = new Int32Array(N), kind = []; // 0 fill, 1 satin, 2 dot rows, 3 dot columns, 4 dot at the chosen angle
+    for (let p0 = 0; p0 < N; p0++) { if (!m[p0] || comp[p0] >= 0) continue; const id = kind.length; let sp = 0, mx = 0, x0 = W, x1 = 0, y0 = H, y1 = 0, ar = 0, per = 0; comp[p0] = id; st2[sp++] = p0;
+      while (sp) { const p = st2[--sp], x = p % W, y = (p / W) | 0; ar++; if (dd[p] === 3) per++; if (dd[p] > mx) mx = dd[p]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
         for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, p - W, p + W]) if (q >= 0 && q < N && m[q] && comp[q] < 0) { comp[q] = id; st2[sp++] = q; } }
-      compMax.push(mx / 3); }
-    const satinMask = new Uint8Array(N); let anySatin = false;
-    for (let p = 0; p < N; p++) if (m[p] && compMax[comp[p]] <= 18) { satinMask[p] = 1; m[p] = 0; anySatin = true; }
-    const satin = anySatin ? satinChains(satinMask, W, H, Math.max(3, spacing * 0.9), 60).map(ch => ch.map(([x, y]) => [x - Math.round(cx), y - Math.round(cy)])) : [];
-    const rows = []; let ri = 0;
-    for (let v = -D; v <= D; v += spacing, ri++) {
-      const segs = []; let a = null;
-      for (let u = -D; u <= D; u++) {
-        const x = Math.round(cx + u * c - v * s), y = Math.round(cy + u * s + v * c);
-        const on = x >= 0 && y >= 0 && x < W && y < H && m[y * W + x];
-        if (on && a === null) a = u; else if (!on && a !== null) { if (u - 1 - a >= 3) segs.push({ r: ri, v, a, b: u - 1, used: false }); a = null; }
-      }
-      rows.push(segs);
-    }
-    const all = rows.flat(); if (!all.length && !satin.length) continue;
-    const chains = []; let px = null, py = null;
-    const toXY = (u, v) => [u * c - v * s, u * s + v * c];
-    while (true) {
-      // next run: the unused row-segment end closest to where the needle is
-      let best = null, bd = Infinity, bdir = 1;
-      for (const g of all) { if (g.used) continue;
-        if (px === null) { best = g; bdir = 1; break; }
-        for (const [uu, dir] of [[g.a, 1], [g.b, -1]]) { const [x, y] = toXY(uu, g.v), dd = (x - px) ** 2 + (y - py) ** 2; if (dd < bd) { bd = dd; best = g; bdir = dir; } } }
-      if (!best) break;
-      const chain = []; let cur = best, dir = bdir;
-      while (cur) {
-        cur.used = true; chain.push([cur, dir]);
-        const exit = dir > 0 ? cur.b : cur.a, nr = rows[cur.r + 1]; let nx = null, nd = Infinity;
-        if (nr) for (const g of nr) { if (g.used || g.a > cur.b || g.b < cur.a) continue;
-          const st = -dir > 0 ? g.a : g.b, dd = Math.abs(st - exit); if (dd < nd && dd <= 30) { nd = dd; nx = g; } }
-        cur = nx; dir = -dir;
-      }
-      // stitch points
-      const pts = [];
-      for (const [g, dir] of chain) {
-        const from = dir > 0 ? g.a : g.b, to = dir > 0 ? g.b : g.a, off = (g.r % 3) * L / 3;
-        pts.push(toXY(from, g.v));
-        let u = dir > 0 ? Math.ceil((from - off) / L) * L + off : Math.floor((from - off) / L) * L + off;
-        for (; dir > 0 ? u < to : u > to; u += dir * L) if (Math.abs(u - from) > 8 && Math.abs(to - u) > 8) pts.push(toXY(u, g.v));
-        pts.push(toXY(to, g.v));
-      }
-      const last = pts[pts.length - 1]; px = last[0]; py = last[1];
-      chains.push(pts.map(([x, y]) => [Math.round(x), Math.round(y)]));
-    }
-    blocks.push({ color: colors[k - 1], chains: satin.concat(chains) });
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      const r = mx / 3, narrow = r <= 18 || (!gs && r <= EMB_SATIN_MAX && per * per / ar >= EMB_LONG); // up to ~3.5 mm across, or up to ~5 mm when it is clearly a long stroke
+      kind.push(!narrow ? 0 : gs || Math.max(bw, bh) > EMB_DOT_MAX ? 1 : bh > bw * 1.4 ? 2 : bw > bh * 1.4 ? 3 : 4); }
+    // small details of a later colour that sit inside a filled area (dots on a ball): fill straight through underneath them
+    if (!gs) { const seen = new Uint8Array(N);
+      for (let p0 = 0; p0 < N; p0++) { if (m[p0] || seen[p0]) continue; const px = []; let sp = 0, ok = true, into = -1; seen[p0] = 1; st2[sp++] = p0;
+        while (sp) { const p = st2[--sp], x = p % W, y = (p / W) | 0; px.push(p); if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || lab[p] <= k) ok = false;
+          for (const q of [x > 0 ? p - 1 : -1, x < W - 1 ? p + 1 : -1, y > 0 ? p - W : -1, y < H - 1 ? p + W : -1]) { if (q < 0) continue; if (m[q]) { if (kind[comp[q]] !== 0) ok = false; else into = comp[q]; } else if (!seen[q]) { seen[q] = 1; st2[sp++] = q; } } }
+        if (ok && into >= 0 && px.length <= 900) for (const p of px) { m[p] = 1; comp[p] = into; } } }
+    const part = t => { const o = new Uint8Array(N); let any = false; for (let p = 0; p < N; p++) if (m[p] && kind[comp[p]] === t) { o[p] = 1; any = true; } return any ? o : null; };
+    const centre = chs => chs.map(ch => ch.map(([x, y]) => [x - Math.round(cx), y - Math.round(cy)]));
+    const zz = Math.max(1.8, spacing / 2); // satin: each stitch moves on half the spacing, so stitches on one side sit one spacing apart
+    let chains = [], mk2;
+    if (gs && (mk2 = part(1))) chains = centre(satinOutline(mk2, W, H, Math.max(3, spacing * 0.9), 60));
+    if ((mk2 = part(0))) chains = chains.concat(fillChains(mk2, W, H, spacing, angleDeg, 35));
+    if (!gs && (mk2 = part(1))) { const busy = new Uint8Array(N); chains = chains.concat(centre(satinChains(mk2, W, H, zz, 70, busy)));
+      if (busy.some(v => v)) chains = chains.concat(fillChains(busy, W, H, zz, angleDeg, 0)); }
+    if ((mk2 = part(2))) chains = chains.concat(fillChains(mk2, W, H, zz, 0, 0));
+    if ((mk2 = part(3))) chains = chains.concat(fillChains(mk2, W, H, zz, 90, 0));
+    if ((mk2 = part(4))) chains = chains.concat(fillChains(mk2, W, H, zz, angleDeg, 0));
+    if (!chains.length) continue;
+    blocks.push({ color: colors[k - 1], chains, m, W, H });
   }
   return blocks;
 }
@@ -1942,7 +2089,9 @@ function embStream(blocks) {
   blocks.forEach((b, bi) => {
     if (bi > 0) { out.push([x, y, 'T']); out.push([x, y, 'C']); }
     b.chains.forEach((pts, ci) => {
-      const [sx, sy] = pts[0], far = Math.hypot(sx - x, sy - y) > 20;
+      const [sx, sy] = pts[0], gap = Math.hypot(sx - x, sy - y); let far = gap > 20;
+      if (!far && gap > 6 && b.m) { // a short hop is sewn without a trim only if it stays on this colour, so it never shows across another colour or the fabric
+        for (let i = 1, n = Math.ceil(gap / 2); i < n && !far; i++) { const hx2 = Math.round(x + (sx - x) * i / n + b.W / 2), hy2 = Math.round(y + (sy - y) * i / n + b.H / 2); if (!(hx2 >= 0 && hy2 >= 0 && hx2 < b.W && hy2 < b.H && b.m[hy2 * b.W + hx2])) far = true; } }
       if (out.length === 0 || ci === 0 || far) {
         const prev = out.length ? out[out.length - 1][2] : null;
         if (prev === 'S') out.push([x, y, 'T']);
@@ -2152,9 +2301,10 @@ function embPreview() {
     px = sx; py = sy;
   }
   x.stroke();
+  const nCol = new Set(EMB.colors.map(c => c.join())).size;
   const bd = embBounds(EMB.stream.filter(s => s[2] === 'S')), wmm = (bd[2] - bd[0]) / 10, hmm = (bd[3] - bd[1]) / 10;
   const hoop = wmm <= 100 && hmm <= 100 ? '4×4" (100×100 mm)' : wmm <= 130 && hmm <= 180 ? '5×7" (130×180 mm)' : wmm <= 160 && hmm <= 260 ? '6×10" (160×260 mm)' : 'large/multi-needle hoop';
-  $('#embStat').innerHTML = `<b>${n.toLocaleString()}</b> stitches · <b>${EMB.colors.length}</b> color${EMB.colors.length > 1 ? 's' : ''} · ${jumps} jumps/trims<br>Size: <b>${wmm.toFixed(1)} × ${hmm.toFixed(1)} mm</b> (${(wmm / 25.4).toFixed(2)} × ${(hmm / 25.4).toFixed(2)}") · fits a ${hoop} hoop<br>Thread order: ` +
+  $('#embStat').innerHTML = `<b>${n.toLocaleString()}</b> stitches · <b>${nCol}</b> color${nCol > 1 ? 's' : ''}${EMB.colors.length > nCol ? ` in ${EMB.colors.length} steps` : ''} · ${jumps} jumps/trims<br>Size: <b>${wmm.toFixed(1)} × ${hmm.toFixed(1)} mm</b> (${(wmm / 25.4).toFixed(2)} × ${(hmm / 25.4).toFixed(2)}") · fits a ${hoop} hoop<br>Thread order: ` +
     EMB.colors.map((c, i) => `<span style="white-space:nowrap"><span class="prev" style="display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;background:${col(c)};box-shadow:inset 0 0 0 1px rgba(0,0,0,.3)"></span> ${i + 1}. ${hx(c).toUpperCase()}</span>`).join(' &nbsp;');
 }
 function embName() { const base = EMB.src === 'gs' ? 'GS_Logo' : (S.name || 'design'); return `${base}_${(+$('#embW').value || 3.5)}in`; }
@@ -2330,7 +2480,7 @@ $$('#embView button').forEach(btn => btn.onclick = () => {
   if (EMB.view === 'hat') { if (!EMB.hatSized) { EMB.hatSized = true; $('#embH').value = 2.75; embSyncSizes('h'); embRefresh(); } embHatChips(); embHatRender(); } else if (EMB.stream) embPreview();
 });
 
-window.__emb = { EMB, embHatRender, traceLoops, polyArea, satinChains, simplifyLoop, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
+window.__emb = { EMB, embHatRender, traceLoops, polyArea, satinChains, satinOutline, fillChains, embLabel, embLayers, simplifyLoop, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
 
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
