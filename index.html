@@ -317,8 +317,11 @@
   <div class="grid">
     <div>
       <div class="card sticky">
+        <label class="btn dark" id="embUp" style="display:block;text-align:center;margin-bottom:10px">Upload a logo
+          <input type="file" id="embFile" accept="image/*" hidden></label>
         <div class="seg" id="embView" style="margin-bottom:10px">
-          <button data-v="stitch" class="on">Stitches</button>
+          <button data-v="real" class="on">Embroidered</button>
+          <button data-v="stitch">Stitches</button>
           <button data-v="hat">3D puff on hat</button>
         </div>
         <div class="chips" id="embBg" style="margin-bottom:10px">
@@ -334,7 +337,8 @@
           <p class="hint" id="embHatNote"></p>
         </div>
         <div class="stat" id="embStat">—</div>
-        <p class="hint">Stitch preview: every line is a stitch. Auto-digitized with tatami fill — always sew a test on scrap fabric before a full run.</p>
+        <button class="btn" id="embPic" style="margin-top:10px">Save this picture</button>
+        <p class="hint" id="embViewHint"></p>
       </div>
     </div>
     <div>
@@ -342,7 +346,7 @@
         <h2>Design</h2>
         <div class="seg" id="embSrc">
           <button data-src="gs" class="on">GS Logo</button>
-          <button data-src="upload">My uploaded design</button>
+          <button data-src="upload">My uploaded logo</button>
         </div>
         <p class="hint" id="embSrcNote">Uses the colors and style you picked on the <b>Vectorized GS Logo</b> page. Transparent parts aren't stitched.</p>
       </div>
@@ -380,7 +384,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 5, 5:20 AM — digitizer-style satin (centerline zigzag, mitered corners)</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 24, 8:30 PM — upload a logo on the Embroidery page and see it embroidered</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -401,7 +405,7 @@ $('#file').addEventListener('change', e => e.target.files[0] && loadFile(e.targe
 ['dragleave','drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', e => e.dataTransfer.files[0] && loadFile(e.dataTransfer.files[0]));
 
-function loadFile(file) {
+function loadFile(file, after) {
   busy(true, 'Loading image…');
   const url = URL.createObjectURL(file);
   const img = new Image();
@@ -422,6 +426,7 @@ function loadFile(file) {
     { const c0 = logoColors(S.orig); const lm = c0.length <= 8 && logoFit(S.orig, c0) > 0.97; // solid-colour logo? clean its edges by default
       $('#logoMode').checked = lm; $('#logoOpts').classList.toggle('hidden', !lm); $('#svgBtn').classList.toggle('hidden', !lm); }
     rebuildBase(); busy(false);
+    if (after) after();
   };
   img.onerror = () => { URL.revokeObjectURL(url); busy(false); alert('Could not open that image. Try a PNG or JPG.'); };
   img.src = url;
@@ -2118,7 +2123,7 @@ function writeJEF(stream, colors) {
 function embRefresh() { clearTimeout(EMB.timer); EMB.timer = setTimeout(embBuild, 120); }
 async function embBuild() {
   const src = embSource();
-  if (!src) { EMB.stream = null; $('#embStat').innerHTML = 'Upload a design on the <b>Image → DTF</b> page first, or pick <b>GS Logo</b>.'; const x = $('#embCanvas').getContext('2d'); x.clearRect(0, 0, 1e4, 1e4); return; }
+  if (!src) { EMB.stream = null; $('#embStat').innerHTML = 'Tap <b>Upload a logo</b> to see it embroidered, or pick <b>GS Logo</b>.'; const x = $('#embCanvas').getContext('2d'); x.clearRect(0, 0, 1e4, 1e4); return; }
   busy(true, 'Digitizing stitches…'); await tick();
   try {
     const spacing = +($('#embDensity .on').dataset.d), ang = +($('#embAngle .on').dataset.a);
@@ -2132,6 +2137,7 @@ async function embBuild() {
     }
     if (!$('#embH').value) embSyncSizes('w');
     embPreview();
+    if (EMB.view === 'real') embRealRender();
     if (EMB.view === 'hat') embHatRender();
   } catch (e) {
     EMB.stream = null;
@@ -2172,11 +2178,22 @@ $('#embEmb').onclick = () => $('#embEmbNote').classList.toggle('hidden');
 $$('#embSrc button').forEach(btn => btn.onclick = () => {
   EMB.src = btn.dataset.src; $$('#embSrc button').forEach(x => x.classList.toggle('on', x === btn));
   $('#embSrcNote').innerHTML = EMB.src === 'gs' ? 'Uses the colors and style you picked on the <b>Vectorized GS Logo</b> page. Transparent parts aren\'t stitched.'
-    : 'Uses the image from the <b>Image → DTF</b> page (after your color fixes), simplified to its main solid colors (up to 8). Works best on clean logos.';
+    : 'Uses the logo you uploaded (here or on the <b>Image → DTF</b> page, with your color fixes), simplified to its main solid colors (up to 8). Works best on clean logos.';
+  embSyncSizes($('#embSizes .on') && $('#embSizes .on').dataset.h ? 'h' : 'w');
   embRefresh();
 });
+// upload right here: the logo goes through the same background removal as the Image → DTF page
+$('#embFile').onchange = e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  loadFile(f, () => $('#embSrc [data-src="upload"]').click());
+};
+$('#embPic').onclick = () => {
+  if (!EMB.stream) { alert('Nothing to show yet.'); return; }
+  const tag = EMB.view === 'hat' ? 'on_hat' : EMB.view === 'real' ? 'embroidered' : 'stitches';
+  $('#embCanvas').toBlob(b => b && gsSave(b, `${embName()}_${tag}.png`).catch(e => alert(e.message || e)), 'image/png');
+};
 for (const id of ['embDensity', 'embAngle']) $$(`#${id} button`).forEach(btn => btn.onclick = () => { $$(`#${id} button`).forEach(x => x.classList.toggle('on', x === btn)); embRefresh(); });
-$$('#embBg button').forEach(btn => btn.onclick = () => { $$('#embBg button').forEach(x => x.classList.toggle('on', x === btn)); $('#embStage').className = 'stage ' + btn.dataset.bg; });
+$$('#embBg button').forEach(btn => btn.onclick = () => { $$('#embBg button').forEach(x => x.classList.toggle('on', x === btn)); $('#embStage').className = 'stage ' + btn.dataset.bg; if (EMB.view === 'real' && EMB.stream) embRealRender(); });
 // width and height stay linked through the design's own proportions
 function embAspect() { // height / width of the current design
   if (EMB.src === 'gs') { const { b } = gsSize(); return (b[3] - b[1]) / (b[2] - b[0]); }
@@ -2209,7 +2226,7 @@ const HATS = [
   { id: 'white-columbia', name: 'White · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: null },
   { id: 'white-navy-columbia', name: 'White · Navy · Columbia visor', front: { cx: 0.5, cy: 0.555 }, angle: null }
 ];
-EMB.view = 'stitch'; EMB.hat = 0; EMB.hatView = 'front';
+EMB.view = 'real'; EMB.hat = 0; EMB.hatView = 'front';
 const hatImgs = {};
 function hatImage(id, view) {
   const key = id + '-' + view; if (hatImgs[key]) return hatImgs[key];
@@ -2313,6 +2330,77 @@ function embHatRender() {
   $('#embHatNote').innerHTML = (wIn > 4.5 ? '<b style="color:#c0262d">Most caps take up to about 4.5" wide on the front — try the Hat size.</b><br>' : '') +
     'Shown on The Game GB998 Perforated GameChanger (product photos). Real 3D puff is sewn with satin columns over foam; the exported files are flat fill, so ask your embroiderer to digitize for puff (or use the files as-is for flat embroidery).';
 }
+
+/* ---------------- "Embroidered" preview ----------------
+   The real stitch list sewn onto fabric: every stitch is drawn as a strand of thread, in sewing
+   order, so later stitches lie over earlier ones. Each strand gets a dark edge, a body whose
+   brightness depends on its direction (thread sheen), and a thin highlight; the whole design
+   casts a soft shadow on a knit-textured shirt in the chosen colour. */
+const EMB_FABRIC = { white: [243, 243, 240], black: [26, 26, 28], gray: [138, 141, 145], navy: [29, 42, 74] };
+const EMB_HINTS = {
+  real: 'A picture of your design sewn out, built from the real stitches in the files below. Thread shine and colors vary by brand — always sew a test on scrap fabric before a full run.',
+  stitch: 'Stitch preview: every line is a stitch. Auto-digitized with tatami fill — always sew a test on scrap fabric before a full run.',
+  hat: ''
+};
+function embViewHint() { $('#embViewHint').textContent = EMB_HINTS[EMB.view] || ''; }
+function embFabric(x, w, h, base) {
+  const T = 96, t = mk(T, T), tx = t.getContext('2d'), id = tx.createImageData(T, T), o = id.data;
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const lumB = (base[0] * 0.299 + base[1] * 0.587 + base[2] * 0.114) / 255, amp = 5 + 9 * (1 - Math.abs(lumB - 0.5) * 2) + (lumB < 0.3 ? 5 : 0);
+  for (let y = 0; y < T; y++) for (let xx = 0; xx < T; xx++) {
+    // jersey knit: columns of little V-shaped loops
+    const col = xx % 6, v = Math.abs(col - 2.5) / 2.5, row = (y + (col < 3 ? col : 5 - col)) % 4;
+    const k = (v - 0.5) * amp * 1.1 + (row === 0 ? -amp * 0.6 : 0) + (rnd() - 0.5) * amp * 0.7, i = (y * T + xx) * 4;
+    o[i] = clamp(base[0] + k); o[i + 1] = clamp(base[1] + k); o[i + 2] = clamp(base[2] + k); o[i + 3] = 255;
+  }
+  tx.putImageData(id, 0, 0);
+  x.fillStyle = x.createPattern(t, 'repeat'); x.fillRect(0, 0, w, h);
+  const g = x.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.25, w / 2, h / 2, Math.max(w, h) * 0.75); // soft light falloff
+  g.addColorStop(0, 'rgba(255,255,255,0.05)'); g.addColorStop(1, 'rgba(0,0,0,0.16)'); x.fillStyle = g; x.fillRect(0, 0, w, h);
+}
+function embRealRender() {
+  if (!EMB.stream) return;
+  const cv = $('#embCanvas'), M = 110, k = Math.min(1180 / EMB.W, 1500 / EMB.H);
+  const cw = 1400, ch = Math.round(EMB.H * k + 2 * M), ox = (cw - EMB.W * k) / 2, oy = M;
+  cv.width = cw; cv.height = ch;
+  const x = cv.getContext('2d'), bgName = ($('#embBg .on') || {}).dataset ? $('#embBg .on').dataset.bg : 'white', fab = EMB_FABRIC[bgName] || EMB_FABRIC.white;
+  embFabric(x, cw, ch, fab);
+  const X = v => ox + (v + EMB.W / 2) * k, Y = v => oy + (v + EMB.H / 2) * k;
+  const t = Math.max(1.6, 4.3 * k), rgb = (c, m, w = 0) => `rgb(${clamp(c[0] * m + (255 - c[0]) * w) | 0},${clamp(c[1] * m + (255 - c[1]) * w) | 0},${clamp(c[2] * m + (255 - c[2]) * w) | 0})`;
+  // 1. the stitched mass, dark, with a soft drop shadow: fabric shadow + the shaded underside of the thread
+  const under = mk(cw, ch), ux = under.getContext('2d'); ux.lineCap = 'round'; ux.lineWidth = t * 1.05;
+  { let ci = 0, px = 0, py = 0; ux.strokeStyle = rgb(EMB.colors[0], 0.42); ux.beginPath();
+    for (const [sx, sy, f] of EMB.stream) {
+      if (f === 'S') { ux.moveTo(X(px), Y(py)); ux.lineTo(X(sx), Y(sy)); }
+      else if (f === 'C') { ux.stroke(); ci++; ux.strokeStyle = rgb(EMB.colors[ci], 0.42); ux.beginPath(); }
+      px = sx; py = sy; }
+    ux.stroke(); }
+  x.save(); x.shadowColor = 'rgba(0,0,0,0.5)'; x.shadowBlur = t * 2.2; x.shadowOffsetX = t * 0.7; x.shadowOffsetY = t * 0.9; x.drawImage(under, 0, 0); x.restore();
+  // 2. every stitch as a strand of thread, in sewing order
+  x.lineCap = 'round';
+  let ci = 0, px = 0, py = 0, col = EMB.colors[0], seed = 11;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647, LA = -2.2; // light from the upper left
+  const lx = Math.cos(LA) * t * 0.13, ly = Math.sin(LA) * t * 0.13;
+  let lumC = (col[0] * 0.299 + col[1] * 0.587 + col[2] * 0.114) / 255;
+  for (const [sx, sy, f] of EMB.stream) {
+    if (f === 'C') { ci++; col = EMB.colors[ci]; lumC = (col[0] * 0.299 + col[1] * 0.587 + col[2] * 0.114) / 255; }
+    else if (f === 'S') {
+      const x0 = X(px), y0 = Y(py), x1 = X(sx), y1 = Y(sy), dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+      if (len > 0.3) {
+        // sheen: thread is brightest lying across the light, dullest pointing along it
+        const across = Math.abs(Math.sin(Math.atan2(dy, dx) - LA)), lit = 0.8 + 0.26 * across + (rnd() - 0.5) * 0.07;
+        x.strokeStyle = rgb(col, lit * (0.6 + 0.12 * lumC)); x.lineWidth = t; x.beginPath(); x.moveTo(x0, y0); x.lineTo(x1, y1); x.stroke();
+        x.strokeStyle = rgb(col, lit, 0.04); x.lineWidth = t * 0.66; x.beginPath(); x.moveTo(x0 + lx, y0 + ly); x.lineTo(x1 + lx, y1 + ly); x.stroke();
+        if (len > t * 1.2) { // glossy highlight along the middle of the strand
+          const a = 0.2, b = 0.8;
+          x.strokeStyle = rgb(col, lit, 0.22 + 0.3 * across * (1 - lumC * 0.5)); x.lineWidth = t * 0.22; x.globalAlpha = 0.75; x.beginPath();
+          x.moveTo(x0 + dx * a + lx * 1.8, y0 + dy * a + ly * 1.8); x.lineTo(x0 + dx * b + lx * 1.8, y0 + dy * b + ly * 1.8); x.stroke(); x.globalAlpha = 1;
+        }
+      }
+    }
+    px = sx; py = sy;
+  }
+}
 function embHatChips() {
   const box = $('#embHats'); box.innerHTML = '';
   HATS.forEach((h, i) => {
@@ -2327,10 +2415,12 @@ $$('#embView button').forEach(btn => btn.onclick = () => {
   EMB.view = btn.dataset.v; $$('#embView button').forEach(x => x.classList.toggle('on', x === btn));
   $('#embHatBox').classList.toggle('hidden', EMB.view !== 'hat'); $('#embBg').classList.toggle('hidden', EMB.view === 'hat');
   $('#embStage').className = 'stage ' + (EMB.view === 'hat' ? 'white' : ($('#embBg .on').dataset.bg));
-  if (EMB.view === 'hat') { if (!EMB.hatSized) { EMB.hatSized = true; $('#embH').value = 2.75; embSyncSizes('h'); embRefresh(); } embHatChips(); embHatRender(); } else if (EMB.stream) embPreview();
+  if (EMB.view === 'hat') { if (!EMB.hatSized) { EMB.hatSized = true; $('#embH').value = 2.75; embSyncSizes('h'); embRefresh(); } embHatChips(); embHatRender(); } else if (EMB.stream) { embPreview(); if (EMB.view === 'real') embRealRender(); }
+  embViewHint();
 });
+embViewHint();
 
-window.__emb = { EMB, embHatRender, traceLoops, polyArea, satinChains, simplifyLoop, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
+window.__emb = { EMB, embHatRender, embRealRender, traceLoops, polyArea, satinChains, simplifyLoop, embSource, embDigitize, embStream, writeDST, writePES, writeJEF };
 
 
 function busy(on, msg) { $('#busy').classList.toggle('on', on); if (msg) $('#busyMsg').textContent = msg; }
