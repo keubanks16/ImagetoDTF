@@ -380,7 +380,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 25, 10:05 AM — cleaner embroidery for uploaded designs (true colors on edges, details sewn on top, smoother satin)</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 25, 10:40 AM — cleaner embroidery for uploaded designs (true colors on edges, details sewn on top, smoother satin, clean small lettering)</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -1859,11 +1859,13 @@ function satinChains(mask, W, H, spacing, maxLen, busy) {
     for (const p of px) cm[p] = 1;
     const maxW = Math.min(maxLen, 2.4 * (mx / 3) + 4), PULL = 0.8; // widest stitch allowed for this piece
     const loops = traceLoops(cm, W, H).map(l => ({ l, a: polyArea(l) })).filter(o => o.a >= 4).sort((u, v) => v.a - u.a).map(o => simplifyLoop(o.l, 1.4));
-    if (busy) { // lots of corners for its length (serif lettering, fiddly shapes): satin round every corner turns to a tangle, so hand the piece back for plain zigzag rows
-      let corners = 0, len = 0;
-      for (const [xs, ys] of loops) for (let i = 0, n = xs.length; i < n; i++) { const ax = xs[i] - xs[(i + n - 1) % n], ay = ys[i] - ys[(i + n - 1) % n], bx = xs[(i + 1) % n] - xs[i], by = ys[(i + 1) % n] - ys[i];
-        len += Math.hypot(bx, by); if (Math.abs(Math.atan2(ax * by - ay * bx, ax * bx + ay * by)) > 0.6) corners++; }
-      if (corners > 8 && corners / (len / (2 * mx / 3)) > 1) /* more than one corner per stroke-width of outline */ { for (const p of px) { busy[p] = 1; cm[p] = 0; } continue; }
+    if (busy) { // lettering and fiddly shapes (strokes that double back or branch, or lots of corners): satin following the outline turns to a tangle there, so hand the piece back for straight zigzag stitching
+      let corners = 0, len = 0, bends = 0, lt = 0, rt = 0;
+      for (const [xs, ys] of loops) { for (let i = 0, n = xs.length; i < n; i++) { const ax = xs[i] - xs[(i + n - 1) % n], ay = ys[i] - ys[(i + n - 1) % n], bx = xs[(i + 1) % n] - xs[i], by = ys[(i + 1) % n] - ys[i];
+        const tn = Math.atan2(ax * by - ay * bx, ax * bx + ay * by); len += Math.hypot(bx, by); if (Math.abs(tn) > 0.6) corners++; if (Math.abs(tn) > 0.12) { if (tn > 0) lt += tn; else rt -= tn; } }
+      bends = Math.max(bends, Math.min(lt, rt)); lt = rt = 0; // turning against the outline's own direction: an S, G or T doubles back on itself, a swoosh or ring doesn't
+      }
+      if (bends > 1.2 || (corners > 8 && corners / (len / (2 * mx / 3)) > 1)) /* doubles back, or more than one corner per stroke-width of outline */ { for (const p of px) { busy[p] = 1; cm[p] = 0; } continue; }
     }
     for (const [xs, ys] of loops) {
       const n = xs.length; if (n < 3) continue;
@@ -2033,6 +2035,14 @@ function fillChains(m, W, H, spacing, angleDeg, L) {
   }
   return chains;
 }
+/* Lettering and fiddly narrow shapes: plain zigzag rows, all one way so the piece looks even. The rows run
+   side to side when most of the shape is upright strokes (ordinary lettering), up and down when most of it lies flat. */
+function crossChains(m, W, H, zz) {
+  const N = W * H, hr = new Uint16Array(N); let flat = 0, all = 0;
+  for (let y = 0; y < H; y++) for (let x = 0, a = -1; x <= W; x++) { const on = x < W && m[y * W + x]; if (on && a < 0) a = x; else if (!on && a >= 0) { for (let i = a; i < x; i++) hr[y * W + i] = x - a; a = -1; } }
+  for (let x = 0; x < W; x++) for (let y = 0, a = -1; y <= H; y++) { const on = y < H && m[y * W + x]; if (on && a < 0) a = y; else if (!on && a >= 0) { for (let i = a; i < y; i++) { all++; if (y - a < hr[i * W + x] * 0.7) flat++; } a = -1; } }
+  return fillChains(m, W, H, zz, flat > all * 0.6 ? 90 : 0, 0);
+}
 function embDigitize(src, spacing, angleDeg) {
   const { lab, W, H, colors } = src, N = W * H, cx = W / 2, cy = H / 2, blocks = [], gs = !!src.gs; // gs: the built-in GS Logo keeps its own outline satin
   for (let k = 1; k <= colors.length; k++) {
@@ -2069,7 +2079,7 @@ function embDigitize(src, spacing, angleDeg) {
     if (gs && (mk2 = part(1))) chains = centre(satinOutline(mk2, W, H, Math.max(3, spacing * 0.9), 60));
     if ((mk2 = part(0))) chains = chains.concat(fillChains(mk2, W, H, spacing, angleDeg, 35));
     if (!gs && (mk2 = part(1))) { const busy = new Uint8Array(N); chains = chains.concat(centre(satinChains(mk2, W, H, zz, 70, busy)));
-      if (busy.some(v => v)) chains = chains.concat(fillChains(busy, W, H, zz, angleDeg, 0)); }
+      if (busy.some(v => v)) chains = chains.concat(crossChains(busy, W, H, zz)); }
     if ((mk2 = part(2))) chains = chains.concat(fillChains(mk2, W, H, zz, 0, 0));
     if ((mk2 = part(3))) chains = chains.concat(fillChains(mk2, W, H, zz, 90, 0));
     if ((mk2 = part(4))) chains = chains.concat(fillChains(mk2, W, H, zz, angleDeg, 0));
