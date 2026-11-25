@@ -380,7 +380,7 @@
     </div>
   </div>
 </main>
-<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 25, 9:50 AM — cleaner embroidery for uploaded designs (true colors on edges, details sewn on top, smoother satin)</p>
+<p class="hint" style="text-align:center;margin:18px 0 28px">Version: Nov 25, 10:05 AM — cleaner embroidery for uploaded designs (true colors on edges, details sewn on top, smoother satin)</p>
 
 <div class="busy" id="busy"><div class="spin"></div><div id="busyMsg">Working…</div></div>
 
@@ -1846,7 +1846,7 @@ function satinChains(mask, W, H, spacing, maxLen) {
   for (let p = 0; p < N; p++) if (mask[p]) { const x = p % W, y = (p / W) | 0; if (x === 0 || y === 0 || x === W - 1 || y === H - 1 || !mask[p - 1] || !mask[p + 1] || !mask[p - W] || !mask[p + W]) dist[p] = 3; }
   chamfer34(dist, W, H);
   const covered = new Int32Array(N), cm = new Uint8Array(N), RC = 2; let serial = 0;
-  const mark = (x, y, n) => { const x0 = Math.floor(x), y0 = Math.floor(y); for (let dy = -RC; dy <= RC; dy++) for (let dx = -RC; dx <= RC; dx++) { const xi = x0 + dx, yi = y0 + dy; if (xi >= 0 && yi >= 0 && xi < W && yi < H) covered[yi * W + xi] = n; } };
+  const mark = (x, y, n, rc) => { const x0 = Math.floor(x), y0 = Math.floor(y); for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) { const xi = x0 + dx, yi = y0 + dy; if (xi >= 0 && yi >= 0 && xi < W && yi < H) covered[yi * W + xi] = n; } };
   const covBy = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H ? covered[yi * W + xi] : 0; };
   const inMask = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y); return xi >= 0 && yi >= 0 && xi < W && yi < H && cm[yi * W + xi]; };
   let nComp = 0;
@@ -1862,10 +1862,13 @@ function satinChains(mask, W, H, spacing, maxLen) {
     for (const { l } of loops) {
       const [xs, ys] = simplifyLoop(l, 1.4), n = xs.length; if (n < 3) continue;
       const E = []; for (let i = 0; i < n; i++) { const x0 = xs[i], y0 = ys[i], x1 = xs[(i + 1) % n], y1 = ys[(i + 1) % n], L = Math.hypot(x1 - x0, y1 - y0) || 1; E.push({ x0, y0, tx: (x1 - x0) / L, ty: (y1 - y0) / L, ang: Math.atan2((x1 - x0) / L, -(y1 - y0) / L), L }); } // ang = direction of the inward normal
-      let chain = [], side = 1, lastLen = 0, lastAng = 0, first = null; const pending = [], loop0 = serial;
-      const flush = () => { if (chain.length >= 2) chains.push(chain); chain = []; lastLen = 0; };
+      let chain = [], side = 1, lastLen = 0, lastAng = 0, first = null, over = 0; const pending = [], loop0 = serial;
+      const flush = () => { if (chain.length >= 2) chains.push(chain); chain = []; lastLen = 0; over = 0; };
+      const markNext = () => { const x = pending.shift(), y = pending.shift(), n = pending.shift(); mark(x, y, n, n - loop0 <= 3 ? 0 : RC); }; // the first stitches of an outline claim less room, so the stitching coming back round meets them without a gap
       // one stitch straight across the shape, starting on the edge at (px,py) and heading inward at angle a
-      const reach = (bx, by, a) => { const ax = Math.cos(a), ay = Math.sin(a); let t = 0.5; while (t < 4 && !inMask(bx + ax * t, by + ay * t)) t += 0.5; const t1 = t; while (t - t1 <= maxW + 1 && inMask(bx + ax * t, by + ay * t)) t += 0.5; return t - t1; };
+      // a stitch across a stroke passes through its middle; one that only skims along an edge (at the blunt end of a stroke) is left out
+      const skims = (bx, by, ax, ay, t) => { const gx = Math.floor(bx + ax * t / 2), gy = Math.floor(by + ay * t / 2); return (gx >= 0 && gy >= 0 && gx < W && gy < H ? dist[gy * W + gx] / 3 : 0) < 0.15 * t; };
+      const reach = (bx, by, a) => { const ax = Math.cos(a), ay = Math.sin(a); let t = 0.5; while (t < 4 && !inMask(bx + ax * t, by + ay * t)) t += 0.5; const t1 = t; while (t - t1 <= maxW + 1 && inMask(bx + ax * t, by + ay * t)) t += 0.5; return skims(bx + ax * t1, by + ay * t1, ax, ay, t - t1) ? 0 : t - t1; };
       const cast = (bx, by, a, fresh) => {
         const ax = Math.cos(a), ay = Math.sin(a);
         let t0 = 0.5; while (t0 < 3.5 && !inMask(bx + ax * t0, by + ay * t0)) t0 += 0.5; // the smoothed outline can sit a hair off the real edge
@@ -1873,29 +1876,38 @@ function satinChains(mask, W, H, spacing, maxLen) {
         bx += ax * (t0 - 0.5); by += ay * (t0 - 0.5);
         let t = 0.5; while (t <= maxW + 1 && inMask(bx + ax * t, by + ay * t)) t += 0.5;
         let da = a - lastAng; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        if (skims(bx, by, ax, ay, t) && !(lastLen && Math.abs(t - lastLen) <= 0.25 * lastLen + 2 && Math.abs(da) < 0.3)) { flush(); return; }
         if (t > maxW || (lastLen && t > 1.8 * lastLen + 4)) { // running along the stroke instead of across it: a junction or the end of a stroke
           if (lastLen && !fresh && Math.abs(da) < 0.5) t = lastLen; else { flush(); return; } }
         if (t < 3) { flush(); return; }
         const mxp = bx + ax * t / 2, myp = by + ay * t / 2;
         const cb = covBy(mxp, myp); // already sewn from the other side? (the first few stitches of this same outline don't count, so the ends of a ring meet)
-        if (cb && !(cb > loop0 && cb <= loop0 + 8 && first && Math.hypot(bx - first[0], by - first[1]) < 6)) { flush(); return; }
+        if (cb && !(cb > loop0 && cb <= loop0 + 8 && first && Math.hypot(bx - first[0], by - first[1]) < 6)) { if (chain.length && over < 2) over++; else { flush(); return; } } else over = 0; // run two stitches into what's already sewn so the two meet with no slit
         if (!first) first = [bx, by];
         const k = side > 0 ? -PULL : t + PULL;
         chain.push([Math.round(bx + ax * k), Math.round(by + ay * k)]); side = -side; lastLen = t; lastAng = a;
-        pending.push(mxp, myp, ++serial); if (pending.length > 18) mark(pending.shift(), pending.shift(), pending.shift());
+        pending.push(mxp, myp, ++serial); if (pending.length > 18) markNext();
       };
+      const turn = i => { let d = E[i % n].ang - E[(i + n - 1) % n].ang; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; };
+      let capEnd = -1; // while i <= capEnd the outline is going round the end of a stroke
       for (let i = 0; i < n; i++) {
         const e0 = E[(i + n - 1) % n], e = E[i];
-        let da = e.ang - e0.ang; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        let da = turn(i);
+        if (i > capEnd && Math.abs(da) > 0.25) { // does the outline double back within about a stroke width? then this is the end (or tip) of a stroke, not a bend: sew square up to it and nothing round it
+          const lim = 1.5 * (lastLen || 2 * mx / 3); let sum = da, arc = 0, j = i;
+          while (Math.abs(sum) <= 2.4 && j - i < n - 1) { arc += E[j % n].L; if (arc > lim) break; j++; sum += turn(j); }
+          if (Math.abs(sum) > 2.4) { while (j - i < n - 1 && E[j % n].L < 5 && turn(j + 1) * sum > 0) j++; capEnd = j; flush(); } // (a rounded corner is several short edges: take them all)
+        }
+        if (i <= capEnd) { if (i < capEnd) continue; da = 9; } // skip the edges round the end; carry on after its last corner with no fan
         const w1 = reach(e.x0 + e.tx * Math.min(3, e.L / 2), e.y0 + e.ty * Math.min(3, e.L / 2), e.ang);
-        if (Math.abs(da) > 0.05 && Math.abs(da) < 1.75 && lastLen && w1 >= 3 && w1 <= maxW && w1 <= 1.8 * lastLen + 4) { // corner with a stroke on both sides: fan the stitches round it (not round the blunt end or sharp tip of a stroke)
+        if (da !== 9 && Math.abs(da) > 0.05 && Math.abs(da) < 1.75 && lastLen && w1 >= 3 && w1 <= maxW && w1 <= 1.8 * lastLen + 4) { // corner with a stroke on both sides: fan the stitches round it (not round the blunt end or sharp tip of a stroke)
           const steps = Math.min(16, Math.ceil(Math.abs(da) * Math.max(lastLen, 6) / spacing));
           for (let k = 1; k < steps; k++) cast(e.x0, e.y0, e0.ang + da * k / steps, false);
-        } else if (Math.abs(da) > 0.3) while (pending.length) mark(pending.shift(), pending.shift(), pending.shift()); // new direction: don't sew back over what was just laid
+        } else if (Math.abs(da) > 0.3) while (pending.length) markNext(); // new direction: don't sew back over what was just laid
         for (let d = 0, f = true; d < e.L; d += spacing, f = false) cast(e.x0 + e.tx * d, e.y0 + e.ty * d, e.ang, f && Math.abs(da) > 0.3);
       }
       flush();
-      while (pending.length) mark(pending.shift(), pending.shift(), pending.shift());
+      while (pending.length) markNext();
     }
     for (const p of px) cm[p] = 0;
   }
